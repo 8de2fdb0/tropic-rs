@@ -1,0 +1,23 @@
+[build]
+# Set the default target to match the Cortex-M33 in the RP2350
+target = "thumbv8m.main-none-eabihf"
+
+[env]
+DEFMT_LOG = "info"
+
+[target.thumbv8m.main-none-eabihf]
+rustflags = [
+    "-C",
+    "link-arg=--nmagic",
+    "-C",
+    "link-arg=-Tlink.x",
+    "-C",
+    "link-arg=-Tdefmt.x",
+    "-C",
+    "target-cpu=cortex-m33",
+]
+
+# Use picotool for loading.
+#
+# Load an elf, skipping unchanged flash sectors, verify it, and execute it
+runner = "probe-rs run --chip RP235x"

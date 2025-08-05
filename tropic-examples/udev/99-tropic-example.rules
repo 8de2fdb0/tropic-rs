@@ -1,0 +1,6 @@
+SUBSYSTEM=="usb", \
+    ATTRS{idVendor}=="c0de", \
+    ATTRS{idProduct}=="cafe", \
+    TAG+="uaccess" \
+    MODE="660", \
+    GROUP="plugdev"

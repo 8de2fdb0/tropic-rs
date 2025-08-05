@@ -1,0 +1,27 @@
+[package]
+name = "tropic-cert-store"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+tropic-rs = { path = "../tropic-rs" }
+
+# x509 cert parsing
+der = { version = "0.7", default-features = false, features = [
+    "derive",
+    "oid",
+], optional = true }
+der_derive = { version = "0.7", default-features = false, optional = true }
+spki = { version = "0.7", default-features = false, optional = true }
+
+nom = { version = "8", default-features = false, optional = true }
+
+defmt = { version = "1", default-features = false, optional = true }
+
+[features]
+default = ["der-decoder", "nom-decoder"]
+display = []
+defmt = ["dep:defmt"]
+der-decoder = ["dep:der", "dep:der_derive", "dep:spki"]
+nom-decoder = ["dep:nom"]

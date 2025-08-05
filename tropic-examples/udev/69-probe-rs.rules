@@ -1,0 +1,8 @@
+# Raspberry Pi Debug Probe (CMSIS-DAP)
+SUBSYSTEM=="usb", \
+    ATTRS{idVendor}=="2e8a", \
+    ATTRS{idProduct}=="000c", \
+    TAG+="uaccess" \
+    MODE="660", \
+    GROUP="plugdev" \
+    TAG+="uaccess"

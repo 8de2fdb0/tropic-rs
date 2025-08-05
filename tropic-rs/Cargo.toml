@@ -1,0 +1,26 @@
+[package]
+name = "tropic-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embedded-hal = "1"
+
+# bridge traits between rand_core_0_6 -> rand_core_0_9 
+rand_core = { version = "0.9", default-features = false }
+rand_core_compat = { version = "0.1", default-features = false, features = [
+    "rand_core_0_6",
+    "rand_core_0_9",
+] }
+x25519-dalek = { version = "2", default-features = false }
+defmt = { version = "1", optional = true }
+
+[dev-dependencies]
+embedded-hal-mock = { version = "0.11", default-features = false, features = [
+    'eh1',
+] }
+
+[features]
+default = []
+display = []
+defmt = ["dep:defmt"]

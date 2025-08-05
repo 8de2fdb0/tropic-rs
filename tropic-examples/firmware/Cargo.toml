@@ -1,0 +1,79 @@
+[package]
+name = "firmware"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "firmware1"
+path = "src/bin/firmware1.rs"
+
+[[bin]]
+name = "firmware2"
+path = "src/bin/firmware2.rs"
+
+[[bin]]
+name = "firmware3"
+path = "src/bin/firmware3.rs"
+
+[[bin]]
+name = "rtic_usb_api_wip"
+path = "src/bin/rtic_usb_api_wip.rs"
+
+[[bin]]
+name = "tropic_ushell"
+path = "src/bin/tropic_ushell.rs"
+
+[dependencies]
+tropic-rs = { path = "../../tropic-rs" }
+tropic-cert-store = { path = "../../tropic-cert-store", default-features = false, features = [
+    "der-decoder",
+    "nom-decoder",
+    "defmt",
+] }
+
+common = { path = "../common", features = ["rp235x"] }
+
+rp235x-hal = { version = "0.3", features = [
+    "binary-info",
+    "critical-section-impl",
+    "rt",
+    "rtic-monotonic",
+    "defmt",
+] }
+embedded-hal = "1"
+# embedded_hal_0 = { package = "embedded-hal", version = "0.2" }
+embedded-hal-bus = "0.3.0"
+embedded-io = "0.6"
+nb = "1.1"
+
+rtic = { version = "2.2", features = ["thumbv8base-backend"] }
+rtic-monotonics = { version = "2", features = ["rp235x"] }
+rtic-sync = { version = "1" }
+
+usb-device = "0.3"
+usbd-serial = { git = "https://github.com/8de2fdb0/usbd-serial", branch = "copilot/fix-3e38d0e8-b5fe-435d-9a98-aac9ab5e4d45" }
+
+postcard = { version = "1.0", features = [] }
+serde = { version = "1.0", features = ["derive"], default-features = false }
+ufmt = "0.2"
+
+defmt = "1"
+defmt-rtt = "1"
+panic-probe = "1"
+
+embedded-cli = { git = "https://github.com/8de2fdb0/embedded-cli-rs", branch = "feat/public_implementations" }
+# ushell = "0.4"
+ushell = { path = "../../crates/ushell" }
+
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+heapless = "0.7"
+
+panic-halt = "1" # Simple panic handler for embedded
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+lto = true    # Link-time optimization
