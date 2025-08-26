@@ -3,6 +3,7 @@ use der::{
     asn1::{AnyRef, BitStringRef, ObjectIdentifier, UintRef},
 };
 use spki::{AlgorithmIdentifierRef, SubjectPublicKeyInfoRef};
+use tropic_rs::cert_store;
 
 const MAX_RDN_ATTRIBUTES: usize = 5;
 const MAX_RDNS: usize = 10;
@@ -50,6 +51,45 @@ pub struct TbsCertificate<'a> {
     pub subject_public_key_info: SubjectPublicKeyInfoRef<'a>,
     #[asn1(context_specific = "3", optional = "true")]
     pub extensions: Option<der::asn1::SequenceOf<Extension<'a>, MAX_EXTENSIONS>>, // Use AnyRef to capture the whole sequence
+}
+
+/// X25519 Public-Key in DER: 1.3.101.110
+pub(crate) const OBJ_ID_CURVEX25519_PUBKEY: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("1.3.101.110");
+
+/// id-ecPublicKey in OID: 1.2.840.10045.2.1
+pub(crate) const OBJ_ID_EC_PUBKEY: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
+
+/// P-384 in OID: 1.3.132.0.34
+pub(crate) const OBJ_ID_P384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34");
+
+/// P-521 in OID: 1.3.132.0.35
+pub(crate) const OBJ_ID_P521: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.35");
+
+pub(crate) fn get_pubkey_from_subject_public_key_info<'a>(
+    subject_public_key_info: &SubjectPublicKeyInfoRef<'a>,
+) -> Result<tropic_rs::cert_store::SubjectPubkey<'a>, super::Error> {
+    let algorithm = match subject_public_key_info.algorithm.oid {
+        OBJ_ID_CURVEX25519_PUBKEY => tropic_rs::cert_store::PubKeyAlgorithm::X25519Pubkey,
+        OBJ_ID_EC_PUBKEY => {
+            if let Ok(params_oid) = subject_public_key_info.algorithm.parameters_oid() {
+                match params_oid {
+                    OBJ_ID_P384 => tropic_rs::cert_store::PubKeyAlgorithm::EcPubkeyP384,
+                    OBJ_ID_P521 => tropic_rs::cert_store::PubKeyAlgorithm::EcPubkeyP521,
+                    _ => return Err(super::Error::UnknownAlgorithmIdentifier),
+                }
+            } else {
+                return Err(super::Error::UnknownAlgorithmIdentifier);
+            }
+        }
+        _ => return Err(super::Error::UnknownAlgorithmIdentifier),
+    };
+
+    Ok(tropic_rs::cert_store::SubjectPubkey {
+        algorithm,
+        public_key: subject_public_key_info.subject_public_key.raw_bytes(),
+    })
 }
 
 /// The top-level Certificate structure from RFC 5280.
