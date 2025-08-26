@@ -1,10 +1,5 @@
 use super::*;
 
-use crate::{
-    crc16::{crc16, u8_slice_to_crc},
-    l1::ChipStatus,
-};
-
 const GET_INFO_REQ_ID: u8 = 0x01;
 const GET_INFO_REQ_LEN: u8 = 0x02;
 
@@ -122,7 +117,7 @@ impl<const N: usize> From<Response<N>> for GetInfoResp<N> {
     }
 }
 
-pub const GET_INFO_CHIP_INFO_ID_SIZE: usize = 128;
+pub const GET_INFO_CHIP_INFO_ID_SIZE: usize = GET_INFO_BLOCK_LEN;
 pub const GET_INFO_RISCV_FW_SIZE: usize = 4;
 pub const GET_INFO_SPECT_FW_SIZE: usize = 4;
 pub const GET_INFO_FW_HEADER_SIZE: usize = 20;

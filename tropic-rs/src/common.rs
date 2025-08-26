@@ -74,7 +74,7 @@ pub mod config {
             }
         };
     }
-    
+
     #[bitflag(u32)]
     #[derive(Debug, Clone, Copy)]
     pub enum StartUpConfig {
@@ -95,7 +95,7 @@ pub mod config {
     impl core::fmt::Display for StartUpConfig {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             f.write_fmt(format_args!(
-                "Rfu1: {}, Mbist: {}, RngTestDisabled: {}, MaintananceEnabled: {}", 
+                "Rfu1: {}, Mbist: {}, RngTestDisabled: {}, MaintananceEnabled: {}",
                 self.contains(StartUpConfig::Rfu1),
                 self.contains(StartUpConfig::Mbist),
                 self.contains(StartUpConfig::RngTestDisabled),
@@ -144,7 +144,7 @@ pub mod config {
                  self.contains( SensorConfig::TempSensDisabled),
                  self.contains( SensorConfig::LaserDetDisabled)
             ))?;
-            f.write_fmt(format_args!(  
+            f.write_fmt(format_args!(
                 "EmPulseDetDisabled: {}, CpuAlertDisabled: {}, PinVerifBitFlipDisabled: {}, ScbBitFlipDisabled: {}, ", 
                  self.contains(SensorConfig::EmPulseDetDisabled),
                  self.contains(SensorConfig::CpuAlertDisabled),
@@ -158,11 +158,11 @@ pub mod config {
                  self.contains( SensorConfig::RMemBitFlipDisabled),
                  self.contains( SensorConfig::EkdbBitFlipDisabled)
              ))?;
-             f.write_fmt(format_args!(
-                "IMemBitFlipDisabled: {}, PlatformBitFlipDisabled: {}, ", 
-                 self.contains( SensorConfig::IMemBitFlipDisabled),
-                 self.contains( SensorConfig::PlatformBitFlipDisabled)
-             ))            
+            f.write_fmt(format_args!(
+                "IMemBitFlipDisabled: {}, PlatformBitFlipDisabled: {}, ",
+                self.contains(SensorConfig::IMemBitFlipDisabled),
+                self.contains(SensorConfig::PlatformBitFlipDisabled)
+            ))
         }
     }
 
@@ -185,7 +185,6 @@ pub mod config {
     implement_register_addr!(StartUp, StartUpConfig, 0x0, 0x0);
     implement_register_addr!(Sensor, SensorConfig, 0x8, 0x0);
     implement_register_addr!(Debug, DebugConfig, 0x10, 0x0);
-
 }
 
 // #[derive(Debug, Clone)]

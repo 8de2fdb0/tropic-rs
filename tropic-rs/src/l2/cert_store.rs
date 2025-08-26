@@ -102,7 +102,7 @@ where
                         return true;
                     }
                 }
-                return false;
+                false
             })
             .ok_or(Error::CertNotFound)?
         {
@@ -111,22 +111,6 @@ where
         Err(Error::CertNotFound)
     }
 }
-
-// impl<'a> core::fmt::Display for CertificateChain<'a> {
-//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-//         write!(f, "Version: {}\n", self.version)?;
-//         write!(f, "Number of Certificates: {}\n", self.num_certs)?;
-//         write!(f, "Certificate Lengths:\n")?;
-
-//         for cert in &self.certificates {
-//             if let Some(cert) = cert {
-//                 write!(f, "Certificate Kind: {:?}", cert.kind)?;
-//                 write!(f, "\n{}", cert.cert)?;
-//             }
-//         }
-//         Ok(())
-//     }
-// }
 
 pub(crate) fn request_cert_store<
     'a,
@@ -175,7 +159,8 @@ pub(crate) fn request_cert_store<
     // 2. Collect all packets into a fixed-size array on the stack.
     let total_data_size =
         cert_lengths.iter().take(num_certs).sum::<u16>() as usize + header_end_offset;
-    let total_packets_needed = (total_data_size + CERT_STORE_RSP_LEN - 1) / CERT_STORE_RSP_LEN;
+    let total_packets_needed =
+        (total_data_size + CERT_STORE_RSP_LEN - 1).div_ceil(CERT_STORE_RSP_LEN);
 
     if certificate_buffer.len() < total_data_size {
         return Err(l2::Error::CertStore(Error::BufferTooSmall));
@@ -223,21 +208,11 @@ pub(crate) fn request_cert_store<
         // Get the slice for the current certificate.
         let cert_data = &full_data_slice[current_offset..end_offset];
 
-        // let cert = x509_parser::Certificate::from_der(&cert_data)
-        //     .map_err(|e| l2::Error::CertStore(Error::Der(e)))?;
-
-        let cert = C::from_der_and_kind(cert_data, i.into())
-            .map_err(|e| l2::Error::CertStore(Error::Certificate(e.kind())))?;
-
+        // Parse and store in certificates array
         certificates[i] = Some(
             C::from_der_and_kind(cert_data, i.into())
                 .map_err(|e| l2::Error::CertStore(Error::Certificate(e.kind())))?,
         );
-
-        // certificates[i] = Some(Certificate {
-        //     kind: i.into(),
-        //     cert,
-        // });
 
         current_offset = end_offset;
     }

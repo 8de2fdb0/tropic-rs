@@ -76,7 +76,7 @@ fn cumulative_sha256(input: &[u8], cumulative: Option<&[u8]>) -> [u8; 32] {
     if let Some(cumulative) = cumulative {
         hasher.update(cumulative);
     }
-    hasher.update(&input);
+    hasher.update(input);
     let hash = hasher.finalize();
     hash.into()
 }
@@ -119,7 +119,7 @@ fn tropic_hkdf(
 
     // output_2 = HMAC(tmp, output_1 || 0x02)
     let mut helper = [0u8; 33];
-    helper[..32].copy_from_slice(&mut output_1);
+    helper[..32].copy_from_slice(&output_1);
     helper[32] = 0x02;
     let mut mac = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(&tmp).unwrap();
     mac.update(&helper);
@@ -147,9 +147,11 @@ impl TropicNonce {
 pub struct EncSession {
     nonce_cmd: TropicNonce,
     nonce_res: TropicNonce,
+    #[allow(unused)]
     k_auth: [u8; 32],
     k_cmd: [u8; 32],
     k_res: [u8; 32],
+    #[allow(unused)]
     handshake_hash: [u8; 32],
 }
 
@@ -174,9 +176,9 @@ impl EncSession {
         let h = generate_hash(
             &sh_pubkey,
             pairing_key_slot,
-            &st_pubkey,
+            st_pubkey,
             &eh_pubkey,
-            &et_pubkey,
+            et_pubkey,
         );
 
         // ck = HKDF (ck, X25519(EHPRIV, ETPUB), 1)
@@ -197,7 +199,7 @@ impl EncSession {
         let nonce = [0_u8; 12];
 
         let mut buf = [0_u8; 0];
-        let mut cipher = Aes256Gcm::new(&key);
+        let mut cipher = Aes256Gcm::new(key);
         cipher.decrypt_in_place_detached(&nonce.into(), &h, &mut buf, auth_tag.into())?;
 
         Ok(Self {

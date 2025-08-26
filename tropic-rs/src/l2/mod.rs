@@ -26,6 +26,7 @@ pub(crate) const CMD_CRC_LEN: usize = 2;
 // TODO Maximal size of data field in one L2 transfer
 pub(crate) const CHUNK_MAX_DATA_SIZE: usize = 252;
 // Maximal size of one l2 frame
+#[allow(unused)]
 pub(crate) const L2_MAX_FRAME_SIZE: usize =
     CMD_ID_LEN + CMD_SIZE_LEN + CHUNK_MAX_DATA_SIZE + CMD_CRC_LEN;
 
@@ -385,6 +386,7 @@ pub mod log {
     const GET_LOG_REQ_ID: u8 = 0xa2;
     const GET_LOG_REQ_LEN: u8 = 0x00;
 
+    #[allow(unused)]
     const GET_LOG_RSP_MIN_LEN: usize = 0x00;
     pub(crate) const GET_LOG_RSP_MAX_LEN: usize = 0xff;
 
@@ -446,12 +448,16 @@ pub mod enc_cmd {
 
     const ENCRYPTED_CMD_REQ_ID: u8 = 0x04;
 
+    #[allow(unused)]
     const ENCRYPTED_CMD_REQ_LEN_MIN: usize = 19;
+    #[allow(unused)]
     const ENCRYPTED_CMD_REQ_CMD_CIPHERTEXT_LEN_MIN: usize = 1;
 
-    /** Maximal length of field cmd_ciphertext */
+    // Maximal length of field cmd_ciphertext
+    #[allow(unused)]
     const ENCRYPTED_CMD_REQ_CMD_CIPHERTEXT_LEN_MAX: usize = 4096;
 
+    #[allow(unused)]
     const ENCRYPTED_CMD_RSP_LEN_MIN: usize = 19;
 
     const MAX_CHUNKS: usize = l3::FRAME_MAX_LEN.div_ceil(CHUNK_MAX_DATA_SIZE);

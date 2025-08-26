@@ -2,7 +2,8 @@ use embedded_hal::spi::Error as _;
 
 /// TODO Maximal size of data field in one L2 transfer
 const L2_CHUNK_MAX_DATA_SIZE: usize = 252;
-/// Maximal number of data bytes in one L1 transfer
+/// Minimum number of data bytes in one L1 transfer
+#[allow(unused)]
 const LEN_MIN: usize = 1;
 /// Maximal number of data bytes in one L1 transfer
 pub(crate) const LEN_MAX: usize = 1 + 1 + 1 + L2_CHUNK_MAX_DATA_SIZE + 2;
@@ -13,6 +14,7 @@ pub const READ_MAX_TRIES: usize = 10;
 pub const READ_RETRY_DELAY: usize = 25;
 
 /// Maximal timeout when waiting for activity on SPI bus */
+#[allow(unused)]
 const LT_L1_TIMEOUT_MS_MAX: usize = 150;
 
 /// Get response request's ID
@@ -162,11 +164,11 @@ pub(crate) fn receive<
             }
 
             return Ok(Response {
-                chip_status: chip_status,
+                chip_status,
                 status: status[0],
                 len: len[0],
-                data: data,
-                crc: crc,
+                data,
+                crc,
             });
         } else {
             match chip_status.chip_mode() {
@@ -181,7 +183,7 @@ pub(crate) fn receive<
             }
         }
     }
-    return Err(Error::ChipBusy);
+    Err(Error::ChipBusy)
 }
 
 #[cfg(test)]

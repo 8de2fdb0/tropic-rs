@@ -70,7 +70,7 @@ pub struct Tropic01<SPI, D, CDEC> {
     // cs: CS,
 }
 
-impl<'a, SPI, D, CDEC> Tropic01<SPI, D, CDEC>
+impl<SPI, D, CDEC> Tropic01<SPI, D, CDEC>
 where
     SPI: SpiDevice,
     D: embedded_hal::delay::DelayNs,
@@ -301,17 +301,14 @@ where
 mod tests {
     extern crate alloc;
 
+    use embedded_hal_mock::eh1::{
+        delay::CheckedDelay,
+        spi::{Mock as SpiMock, Transaction as SpiMockTransaction},
+    };
+
     use crate::{cert_store::MockDecoder, crc16, l1::ChipStatus};
 
     use super::*;
-
-    use embedded_hal_mock::eh1::{
-        delay::{CheckedDelay, Transaction as CheckedDelayTransaction},
-        digital::{
-            Mock as DigitalMock, State as DigitalMockState, Transaction as DigitalMockTransaction,
-        },
-        spi::{Mock as SpiMock, Transaction as SpiMockTransaction},
-    };
 
     #[test]
     fn get_chip_state() {

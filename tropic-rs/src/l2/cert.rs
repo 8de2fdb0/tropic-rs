@@ -105,10 +105,8 @@ pub trait Certificate<'a>: ErrorType + Sized {
 pub trait CertDecoder: ErrorType + Sized {
     type Cert<'a>: Certificate<'a>;
 
-    fn from_der_and_kind<'a>(
-        der_buf: &'a [u8],
-        kind: CertKind,
-    ) -> Result<Self::Cert<'a>, Self::Error<'a>>;
+    fn from_der_and_kind(der_buf: &[u8], kind: CertKind)
+    -> Result<Self::Cert<'_>, Self::Error<'_>>;
 }
 
 #[cfg(test)]
@@ -144,7 +142,9 @@ pub(crate) mod tests {
     }
 
     pub(crate) struct MockDecoder {
+        #[allow(unused)]
         kind: CertKind,
+        #[allow(unused)]
         pubkey: [u8; 32],
     }
 

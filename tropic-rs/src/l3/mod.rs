@@ -253,10 +253,8 @@ pub fn send<
             if resp.status != l2::Status::RequestOk {
                 return Err(Error::L2(l2::Error::RespErr(resp.status)));
             }
-        } else {
-            if resp.status != l2::Status::RequestCont {
-                return Err(Error::L2(l2::Error::RespErr(resp.status)));
-            }
+        } else if resp.status != l2::Status::RequestCont {
+            return Err(Error::L2(l2::Error::RespErr(resp.status)));
         }
     }
     Ok(())
@@ -269,6 +267,7 @@ pub mod ping {
     const PING_CMD_ID: u8 = 0x01;
 
     // minimal length of field data_in
+    #[allow(unused)]
     const PING_CMD_DATA_LEN_MIN: usize = 0;
 
     // maximal length of field data_in
@@ -278,9 +277,11 @@ pub mod ping {
     const PING_CMD_DATE_LEN: usize = CMD_ID_LEN + PING_CMD_DATA_LEN_MAX;
 
     // result length STATUS[1]
+    #[allow(unused)]
     const PING_RES_LEN_MIN: usize = 1;
 
     // result length STATUS[1]  MSG[0-4096]
+    #[allow(unused)]
     const PING_RES_LEN: usize = RES_STATUS_LEN + PING_LEN_MAX;
 
     pub(crate) const PING_LEN_MAX: usize = CMD_DATA_SIZE_MAX - CMD_ID_LEN;
@@ -316,9 +317,9 @@ pub mod ping {
     }
 
     pub struct PingResp {
-        len: u16,
-        status: Status,
-        msg: [u8; PING_LEN_MAX],
+        pub len: u16,
+        pub status: Status,
+        pub msg: [u8; PING_LEN_MAX],
     }
 
     impl PingResp {
@@ -471,8 +472,8 @@ pub mod payring_key {
     }
 
     pub struct PairingKeyWriteResp {
-        len: u16,
-        status: Status,
+        pub len: u16,
+        pub status: Status,
     }
 
     impl From<Response<PAIRING_KEY_WRITE_RESP_LEN>> for PairingKeyWriteResp {
@@ -521,10 +522,10 @@ pub mod payring_key {
     }
 
     pub struct PairingKeyReadResp {
-        len: u16,
-        status: Status,
-        padding: [u8; 3],
-        s_hipub: [u8; 32],
+        pub len: u16,
+        pub status: Status,
+        pub padding: [u8; 3],
+        pub s_hipub: [u8; 32],
     }
 
     #[cfg(feature = "display")]
@@ -585,8 +586,8 @@ pub mod payring_key {
     }
 
     pub struct PairingKeyInvalidateResp {
-        len: u16,
-        status: Status,
+        pub len: u16,
+        pub status: Status,
     }
 
     impl From<Response<PAIRING_KEY_INVALIDATE_RES_LEN>> for PairingKeyInvalidateResp {
@@ -803,8 +804,8 @@ pub mod reversable_config {
     }
 
     pub struct ConfigWriteResp {
-        len: u16,
-        status: Status,
+        pub len: u16,
+        pub status: Status,
     }
 
     impl TryFrom<Response<R_CONFIG_WRITE_RES_LEN>> for ConfigWriteResp {
@@ -855,10 +856,10 @@ pub mod reversable_config {
     }
 
     pub struct ConfigReadResp<T: Flags<Bits = u32>> {
-        len: u16,
-        status: Status,
-        padding: [u8; 3],
-        value: T,
+        pub len: u16,
+        pub status: Status,
+        pub padding: [u8; 3],
+        pub value: T,
     }
 
     #[cfg(feature = "display")]
@@ -910,6 +911,7 @@ pub mod reversable_config {
     }
 
     impl ConfigEraseCmd {
+        #[allow(unused)]
         fn create() -> Self {
             let mut data = [0_u8; R_CONFIG_ERASE_CMD_LEN];
             data[0] = R_CONFIG_ERASE_CMD_ID;
@@ -929,8 +931,8 @@ pub mod reversable_config {
     }
 
     pub struct ConfigEraseResp {
-        len: u16,
-        status: Status,
+        pub len: u16,
+        pub status: Status,
     }
 
     impl TryFrom<Response<R_CONFIG_ERASE_RES_LEN>> for ConfigEraseResp {
