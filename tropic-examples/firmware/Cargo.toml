@@ -4,18 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "firmware1"
-path = "src/bin/firmware1.rs"
-
-[[bin]]
-name = "firmware2"
-path = "src/bin/firmware2.rs"
-
-[[bin]]
-name = "firmware3"
-path = "src/bin/firmware3.rs"
-
-[[bin]]
 name = "rtic_usb_api_wip"
 path = "src/bin/rtic_usb_api_wip.rs"
 
@@ -24,9 +12,9 @@ name = "tropic_ushell"
 path = "src/bin/tropic_ushell.rs"
 
 [dependencies]
-tropic-rs = { path = "../../tropic-rs" }
+tropic-rs = { path = "../../tropic-rs", features = ["display"] }
 tropic-cert-store = { path = "../../tropic-cert-store", default-features = false, features = [
-    "der-decoder",
+    # "der-decoder",
     "nom-decoder",
     "defmt",
 ] }
@@ -45,6 +33,13 @@ embedded-hal = "1"
 embedded-hal-bus = "0.3.0"
 embedded-io = "0.6"
 nb = "1.1"
+
+rand_core = { version = "0.9", default-features = false }
+rand_core_compat = { version = "0.1", default-features = false, features = [
+    "rand_core_0_6",
+    "rand_core_0_9",
+] }
+rand_chacha = { version = "0.9", default-features = false }
 
 rtic = { version = "2.2", features = ["thumbv8base-backend"] }
 rtic-monotonics = { version = "2", features = ["rp235x"] }
@@ -77,3 +72,8 @@ opt-level = 0
 [profile.release]
 opt-level = 3
 lto = true    # Link-time optimization
+
+[features]
+default = []
+defmt = []
+display = []

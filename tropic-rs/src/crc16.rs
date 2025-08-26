@@ -40,17 +40,6 @@ pub fn crc16_byte(data: u8, mut crc: u16) -> u16 {
     crc
 }
 
-// pub fn crc16(data: &[u8]) -> u16 {
-//     let mut crc = CRC16_INITIAL_VAL;
-
-//     for &byte in data {
-//         crc = crc16_byte(byte, crc);
-//     }
-
-//     crc ^= CRC16_FINAL_XOR_VALUE;
-//     crc.swap_bytes()
-// }
-
 pub fn crc16(data: &[u8], status_and_len: Option<&[u8; 2]>) -> u16 {
     let mut crc = CRC16_INITIAL_VAL;
 

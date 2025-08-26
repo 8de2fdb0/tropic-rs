@@ -22,6 +22,7 @@
         "vscode": {
             "extensions": [
                 "rust-lang.rust-analyzer",
+                "vadimcn.vscode-lldb",
                 "tamasfe.even-better-toml",
                 "BarbossHack.crates-io",
                 // https://probe.rs/docs/tools/debugger/

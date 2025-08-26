@@ -1,4 +1,6 @@
-use nom::{IResult, bytes::complete::take, number::complete::be_u8};
+use nom::{IResult, Parser, bytes::complete::take, combinator::verify, number::complete::be_u8};
+
+use tropic_rs::cert_store::PubKeyAlgorithm;
 
 #[derive(Debug)]
 pub enum Error<'a> {
@@ -7,10 +9,13 @@ pub enum Error<'a> {
     InvalidTbsCertificate,
     MissingSerialNumber,
     MissingSignatureAlgorithm,
+    UnknownSignatureAlgorithm,
     MissingIssuer,
     MissingValidity,
     MissingSubject,
     MissingSPKI,
+    MissingAlgorithmIdentifier,
+    UnknownAlgorithmIdentifier,
     MissingSignatureAlgorithmTop,
     MissingSignatureValue,
     Nom(nom::Err<nom::error::Error<&'a [u8]>>),
@@ -29,10 +34,19 @@ impl<'a> defmt::Format for Error<'a> {
             Self::MissingSignatureAlgorithm => {
                 defmt::write!(f, "Missing signatureAlgorithm")
             }
+            Self::UnknownSignatureAlgorithm => {
+                defmt::write!(f, "Unknown signatureAlgorithm")
+            }
             Self::MissingIssuer => defmt::write!(f, "Missing issuer"),
             Self::MissingValidity => defmt::write!(f, "Missing validity"),
             Self::MissingSubject => defmt::write!(f, "Missing subject"),
             Self::MissingSPKI => defmt::write!(f, "Missing SubjectPublicKeyInfo"),
+            Self::MissingAlgorithmIdentifier => {
+                defmt::write!(f, "Missing AlgorithmIdentifier")
+            }
+            Self::UnknownAlgorithmIdentifier => {
+                defmt::write!(f, "Unknown AlgorithmIdentifier")
+            }
             Self::MissingSignatureAlgorithmTop => {
                 defmt::write!(f, "Missing top-level signatureAlgorithm")
             }
@@ -59,10 +73,19 @@ impl<'a> core::fmt::Display for Error<'a> {
             Self::MissingSignatureAlgorithm => {
                 write!(f, "Missing signatureAlgorithm")
             }
+            Self::UnknownSignatureAlgorithm => {
+                write!(f, "Unknown signatureAlgorithm")
+            }
             Self::MissingIssuer => write!(f, "Missing issuer"),
             Self::MissingValidity => write!(f, "Missing validity"),
             Self::MissingSubject => write!(f, "Missing subject"),
             Self::MissingSPKI => write!(f, "Missing SubjectPublicKeyInfo"),
+            Self::MissingAlgorithmIdentifier => {
+                write!(f, "Missing AlgorithmIdentifier")
+            }
+            Self::UnknownAlgorithmIdentifier => {
+                write!(f, "Unknown AlgorithmIdentifier")
+            }
             Self::MissingSignatureAlgorithmTop => {
                 write!(f, "Missing top-level signatureAlgorithm")
             }
@@ -83,21 +106,34 @@ impl<'a> From<nom::Err<nom::error::Error<&'a [u8]>>> for Error<'a> {
 }
 
 /// ASN.1 tags
-const ASN1DER_BOOLEAN: u8 = 0x01;
-const TAG_INTEGER: u8 = 0x02;
+// const ASN1DER_BOOLEAN: u8 = 0x01;
+// const TAG_INTEGER: u8 = 0x02;
 const TAG_BIT_STRING: u8 = 0x03;
-const TAG_STRING_OCTET: u8 = 0x04;
-const TAG_STRING_NULL: u8 = 0x05;
+// const TAG_STRING_OCTET: u8 = 0x04;
+// const TAG_STRING_NULL: u8 = 0x05;
 const TAG_OBJECT_IDENTIFIER: u8 = 0x06;
-const TAG_STRING_UTF8: u8 = 0x0C;
-const TAG_STRING_PRINTABLE: u8 = 0x13;
-const TAG_UTC_TIME: u8 = 0x17;
+// const TAG_STRING_UTF8: u8 = 0x0C;
+// const TAG_STRING_PRINTABLE: u8 = 0x13;
+// const TAG_UTC_TIME: u8 = 0x17;
 const TAG_SEQUENCE: u8 = 0x30;
 
-/// OBJ_ID_CURVEX25519 in DER: 2B 65 6E
-pub(crate) const OBJ_ID_CURVEX25519: [u8; 3] = [0x2B, 0x65, 0x6E];
-/// ecdsa-with-SHA512 OID: 1.2.840.10045.4.3.4 in DER: 06 08 2A 86 48 CE 3D 04 03 04
-pub(crate) const OID_ECDSA_WITH_SHA512: [u8; 8] = [0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x04];
+/// X25519 Public-Key in DER: 1.3.101.110
+pub(crate) const OBJ_ID_CURVEX25519_PUBKEY: [u8; 3] = [43, 101, 110];
+
+/// id-ecPublicKey in OID: 1.2.840.10045.2.1
+pub(crate) const OBJ_ID_EC_PUBKEY: [u8; 7] = [42, 134, 72, 206, 61, 2, 1];
+
+/// P-384 in OID: 1.3.132.0.34
+pub(crate) const OBJ_ID_P384: [u8; 5] = [43, 129, 4, 0, 34];
+
+/// P-521 in OID: 1.3.132.0.35
+pub(crate) const OBJ_ID_P521: [u8; 5] = [43, 129, 4, 0, 35];
+
+/// ecdsa-with-SHA384 OID: 1.2.840.10045.4.3.3
+pub(crate) const OID_ECDSA_WITH_SHA384: [u8; 8] = [42, 134, 72, 206, 61, 4, 3, 3];
+
+/// ecdsa-with-SHA512 OID: 1.2.840.10045.4.3.4
+pub(crate) const OID_ECDSA_WITH_SHA512: [u8; 8] = [42, 134, 72, 206, 61, 4, 3, 4];
 
 /// Parses ASN.1 DER length (definite form only)
 fn parse_length(input: &[u8]) -> IResult<&[u8], usize> {
@@ -161,8 +197,14 @@ fn parse_sequence_contents(input: &[u8]) -> IResult<&[u8], &[u8]> {
     Ok((input, seq_bytes))
 }
 
+#[derive(Debug, PartialEq)]
+pub struct BitString<'a> {
+    pub unused_bits: u8,
+    pub data: &'a [u8],
+}
+
 /// Parse a BIT STRING and return its contents (excluding tag/length)
-fn parse_bit_string_contents(input: &[u8]) -> IResult<&[u8], &[u8]> {
+fn parse_bit_string_contents(input: &[u8]) -> IResult<&[u8], BitString> {
     let (input, tag) = be_u8(input)?;
     if tag != TAG_BIT_STRING {
         return Err(nom::Err::Error(nom::error::Error::new(
@@ -171,8 +213,87 @@ fn parse_bit_string_contents(input: &[u8]) -> IResult<&[u8], &[u8]> {
         )));
     }
     let (input, len) = parse_length(input)?;
-    let (input, bit_str) = take(len)(input)?;
-    Ok((input, bit_str))
+    let (_, bit_str) = take(len)(input)?;
+
+    let (input, unused_bits) = verify(be_u8, |&b| b <= 7).parse(bit_str)?;
+    Ok((
+        input,
+        BitString {
+            unused_bits,
+            data: &bit_str[1..],
+        },
+    ))
+}
+
+fn parse_algorithm_identifier(input: &[u8]) -> Result<(&[u8], PubKeyAlgorithm), Error<'_>> {
+    let (input, content) =
+        parse_sequence_contents(input).map_err(|_e| Error::MissingAlgorithmIdentifier)?;
+
+    let (content, algorithm_oid) =
+        parse_oid(content).map_err(|_e| Error::MissingAlgorithmIdentifier)?;
+
+    let algorithm = match algorithm_oid {
+        oid if oid == OBJ_ID_CURVEX25519_PUBKEY => PubKeyAlgorithm::X25519Pubkey,
+        oid if oid == OBJ_ID_EC_PUBKEY => {
+            let (_, algorithm_var_oid) =
+                parse_oid(content).map_err(|_e| Error::MissingAlgorithmIdentifier)?;
+            match algorithm_var_oid {
+                oid if oid == OBJ_ID_P384 => PubKeyAlgorithm::EcPubkeyP384,
+                oid if oid == OBJ_ID_P521 => PubKeyAlgorithm::EcPubkeyP521,
+                _ => return Err(Error::UnknownAlgorithmIdentifier),
+            }
+        }
+        _ => return Err(Error::UnknownAlgorithmIdentifier),
+    };
+
+    Ok((input, algorithm))
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SubjectPublicKeyInfo<'a> {
+    pub algorithm: PubKeyAlgorithm,
+    pub public_key: BitString<'a>,
+}
+
+/// Parses the Ed25519 SubjectPublicKeyInfo from a byte slice.
+fn parse_spki(input: &[u8]) -> Result<SubjectPublicKeyInfo<'_>, Error<'_>> {
+    let (_, spki_content) = parse_sequence_contents(input)?;
+
+    let (input, algorithm_identifier) = parse_algorithm_identifier(spki_content)?;
+    let (_, public_key) = parse_bit_string_contents(input).map_err(|_e| Error::MissingSubject)?;
+
+    Ok(SubjectPublicKeyInfo {
+        algorithm: algorithm_identifier,
+        public_key,
+    })
+}
+
+#[derive(Debug, PartialEq)]
+pub enum SignatureAlgorithm {
+    EcdsaWithSha384,
+    EcdsaWithSha512,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Signature<'a> {
+    pub alg: SignatureAlgorithm,
+    pub sig: BitString<'a>,
+}
+
+fn parse_signature(input: &[u8]) -> Result<(&[u8], Signature<'_>), Error<'_>> {
+    let (input, content) = parse_sequence_contents(input)?;
+    let (_, algorithm_oid) =
+        parse_oid(content).map_err(|_e| Error::MissingSignatureAlgorithmTop)?;
+
+    let alg = match algorithm_oid {
+        alg if alg == OID_ECDSA_WITH_SHA384 => SignatureAlgorithm::EcdsaWithSha384,
+        alg if alg == OID_ECDSA_WITH_SHA512 => SignatureAlgorithm::EcdsaWithSha512,
+        _ => return Err(Error::UnknownSignatureAlgorithm),
+    };
+
+    let (_, sig) = parse_bit_string_contents(input).map_err(|_e| Error::MissingSignatureValue)?;
+
+    Ok((input, Signature { alg, sig }))
 }
 
 #[derive(Debug)]
@@ -180,16 +301,17 @@ pub struct Certificate<'a> {
     pub tbs_certificate: &'a [u8],
     pub issuer: &'a [u8],
     pub subject: &'a [u8],
+    pub spki: SubjectPublicKeyInfo<'a>,
     pub validity: &'a [u8],
-    pub signature: &'a [u8],
+    pub signature: Signature<'a>,
     pub raw_der: &'a [u8],
 }
 
 /// Top-level extractor
-pub fn extract_x509_certificate_parts<'a>(der: &'a [u8]) -> Result<Certificate<'a>, Error<'a>> {
+pub fn extract_x509_certificate_parts(der: &[u8]) -> Result<Certificate<'_>, Error<'_>> {
     // Certificate ::= SEQUENCE {
     //      tbsCertificate          SEQUENCE,
-    //      signatureAlgorithm      AlgorithmIdentifier,
+    //      signatureAlgorithm      SEQUENCE,
     //      signatureValue          BIT STRING
     // }
     let (_, cert_seq_contents) =
@@ -212,7 +334,7 @@ pub fn extract_x509_certificate_parts<'a>(der: &'a [u8]) -> Result<Certificate<'
 
     // Check if version is present (context-specific tag [0] = 0xA0)
     if tbs_contents[offset] == 0xA0 {
-        let (_, ctx0_len) = parse_length(&tbs_contents[offset + 1..]).map_err(|e| Error::Nom(e))?;
+        let (_, ctx0_len) = parse_length(&tbs_contents[offset + 1..]).map_err(Error::Nom)?;
         // move offset past [0] version
         offset += 2 + ctx0_len;
     }
@@ -240,70 +362,24 @@ pub fn extract_x509_certificate_parts<'a>(der: &'a [u8]) -> Result<Certificate<'
     // subject (SEQUENCE)
     let (_, subject_full) =
         parse_sequence_full(&tbs_contents[offset..]).map_err(|_e| Error::MissingSubject)?;
-    // offset += subject_full.len();
+    offset += subject_full.len();
 
-    // Now, signatureValue is after signatureAlgorithm in cert_seq_contents
-    // signatureAlgorithm is next after tbsCertificate
-    let (sig_rest, _sigalg2_full) =
-        parse_sequence_full(rest).map_err(|_e| Error::MissingSignatureAlgorithmTop)?;
+    // subject public key info (SEQUENCE)
+    let (_, spki_full) =
+        parse_sequence_full(&tbs_contents[offset..]).map_err(|_e| Error::MissingSPKI)?;
 
-    // signatureValue (BIT STRING)
-    let (_, sig_value) =
-        parse_bit_string_contents(sig_rest).map_err(|_e| Error::MissingSignatureValue)?;
+    let spki = parse_spki(spki_full)?;
+
+    // Now signature is next after tbsCertificate
+    let (_, signature) = parse_signature(rest)?;
 
     Ok(Certificate {
         tbs_certificate: tbs_full,
         issuer: issuer_full,
         subject: subject_full,
+        spki,
         validity: validity_full,
-        signature: sig_value,
+        signature,
         raw_der: der,
     })
-}
-
-/// Find the SubjectPublicKeyInfo SEQUENCE by key_oid or sig_oid in tbsCertificate
-pub fn find_subject_public_key_info<'a>(
-    tbs: &'a [u8],
-    key_oid: &[u8],
-    sig_oid: &[u8],
-) -> Option<&'a [u8]> {
-    // tbsCertificate: parse fields and find SubjectPublicKeyInfo (after subject)
-    let mut offset = 0;
-    if tbs[offset] == 0xA0 {
-        if let Ok((_, ctx0_len)) = parse_length(&tbs[offset + 1..]) {
-            offset += 2 + ctx0_len;
-        }
-    }
-    // serialNumber
-    if let Ok((_, sn_len)) = parse_length(&tbs[offset + 1..]) {
-        offset += 2 + sn_len;
-    }
-    // signature AlgorithmIdentifier
-    if let Ok((_, sigalg_full)) = parse_sequence_full(&tbs[offset..]) {
-        offset += sigalg_full.len();
-    }
-    // issuer
-    if let Ok((_, issuer_full)) = parse_sequence_full(&tbs[offset..]) {
-        offset += issuer_full.len();
-    }
-    // validity
-    if let Ok((_, validity_full)) = parse_sequence_full(&tbs[offset..]) {
-        offset += validity_full.len();
-    }
-    // subject
-    if let Ok((_, subject_full)) = parse_sequence_full(&tbs[offset..]) {
-        offset += subject_full.len();
-    }
-    // SubjectPublicKeyInfo SEQUENCE is next
-    if let Ok((_, spki_full)) = parse_sequence_full(&tbs[offset..]) {
-        // Check AlgorithmIdentifier OID inside SPKI
-        if let Ok((_, alg_id_bytes)) = parse_sequence_contents(&spki_full[2..]) {
-            if let Ok((_, oid_bytes)) = parse_oid(alg_id_bytes) {
-                if oid_bytes == key_oid || oid_bytes == sig_oid {
-                    return Some(spki_full);
-                }
-            }
-        }
-    }
-    None
 }

@@ -23,12 +23,13 @@ pub enum Error {
     L1(l1::Error),
     NotEnoughData,
     BufferTooSmall,
-    // Spki(spki::Error),
-    // Der(der::Error),
     CertNotFound,
     ExtractPubKey,
+    PubKeyWrongSize(usize),
     Certificate(crate::cert_store::ErrorKind),
 }
+
+#[cfg(feature = "display")]
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -38,10 +39,9 @@ impl core::fmt::Display for Error {
             Self::L1(err) => f.write_fmt(format_args!("l1 error: {}", err)),
             Self::NotEnoughData => f.write_str("not enough data"),
             Self::BufferTooSmall => f.write_str("provided certificate buffer is too small"),
-            // Self::Spki(err) => f.write_fmt(format_args!("asn1 parsing error: {}", err)),
-            // Self::Der(err) => f.write_fmt(format_args!("der parsing error: {}", err)),
             Self::CertNotFound => f.write_str("certificate not found"),
             Self::ExtractPubKey => f.write_str("unable to extract pubkey"),
+            Self::PubKeyWrongSize(size) => f.write_fmt(format_args!("pubkey wrong size: {}", size)),
             Self::Certificate(e) => f.write_fmt(format_args!("certificate error: {}", e)),
         }
     }
@@ -68,7 +68,7 @@ pub const CERT_BUFFER_LEN: usize = 10 * CERT_SIZE_SINGLE;
 // The struct to hold the parsed certificates in a no_std friendly way.
 // This assumes a maximum of 10 certificates.
 #[derive(Debug)]
-pub struct CertificateStore<C> {
+pub struct CertStore<C> {
     pub version: u8,
     pub num_certs: u8,
     pub cert_lengths: [u16; NUM_CERTIFICATES],
@@ -76,11 +76,23 @@ pub struct CertificateStore<C> {
     pub certificates: [Option<C>; NUM_CERTIFICATES],
 }
 
-impl<'a, C> CertificateStore<C>
+impl<'a, C> CertStore<C>
 where
     C: Certificate<'a>,
 {
-    pub fn get_pubkey(&self, kind: crate::cert_store::CertKind) -> Result<&[u8], Error> {
+    pub fn get_pubkey(
+        &self,
+        kind: crate::cert_store::CertKind,
+    ) -> Result<x25519_dalek::PublicKey, Error> {
+        let key = self.get_pubke_as_bytes(kind)?;
+        if key.len() != 32 {
+            return Err(Error::PubKeyWrongSize(key.len()));
+        }
+        let key: [u8; 32] = key.try_into().unwrap();
+        Ok(key.into())
+    }
+
+    pub fn get_pubke_as_bytes(&self, kind: crate::cert_store::CertKind) -> Result<&'a [u8], Error> {
         if let Some(cert) = self
             .certificates
             .iter()
@@ -90,31 +102,15 @@ where
                         return true;
                     }
                 }
-                return false;
+                false
             })
             .ok_or(Error::CertNotFound)?
         {
-            return Ok(cert.pubkey()?);
+            return Ok(cert.pubkey()?.public_key);
         }
         Err(Error::CertNotFound)
     }
 }
-
-// impl<'a> core::fmt::Display for CertificateChain<'a> {
-//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-//         write!(f, "Version: {}\n", self.version)?;
-//         write!(f, "Number of Certificates: {}\n", self.num_certs)?;
-//         write!(f, "Certificate Lengths:\n")?;
-
-//         for cert in &self.certificates {
-//             if let Some(cert) = cert {
-//                 write!(f, "Certificate Kind: {:?}", cert.kind)?;
-//                 write!(f, "\n{}", cert.cert)?;
-//             }
-//         }
-//         Ok(())
-//     }
-// }
 
 pub(crate) fn request_cert_store<
     'a,
@@ -125,7 +121,7 @@ pub(crate) fn request_cert_store<
     spi_device: &mut SPI,
     delay: &mut D,
     certificate_buffer: &'a mut [u8],
-) -> Result<CertificateStore<C::Cert<'a>>, l2::Error> {
+) -> Result<CertStore<C::Cert<'a>>, l2::Error> {
     // 1. Parse the header from the first packet (p0).
     let req = info::GetInfoReq::create(
         info::GetInfoObjectId::X509Certificate,
@@ -163,7 +159,8 @@ pub(crate) fn request_cert_store<
     // 2. Collect all packets into a fixed-size array on the stack.
     let total_data_size =
         cert_lengths.iter().take(num_certs).sum::<u16>() as usize + header_end_offset;
-    let total_packets_needed = (total_data_size + CERT_STORE_RSP_LEN - 1) / CERT_STORE_RSP_LEN;
+    let total_packets_needed =
+        (total_data_size + CERT_STORE_RSP_LEN - 1).div_ceil(CERT_STORE_RSP_LEN);
 
     if certificate_buffer.len() < total_data_size {
         return Err(l2::Error::CertStore(Error::BufferTooSmall));
@@ -211,26 +208,16 @@ pub(crate) fn request_cert_store<
         // Get the slice for the current certificate.
         let cert_data = &full_data_slice[current_offset..end_offset];
 
-        // let cert = x509_parser::Certificate::from_der(&cert_data)
-        //     .map_err(|e| l2::Error::CertStore(Error::Der(e)))?;
-
-        let cert = C::from_der_and_kind(cert_data, i.into())
-            .map_err(|e| l2::Error::CertStore(Error::Certificate(e.kind())))?;
-
+        // Parse and store in certificates array
         certificates[i] = Some(
             C::from_der_and_kind(cert_data, i.into())
                 .map_err(|e| l2::Error::CertStore(Error::Certificate(e.kind())))?,
         );
 
-        // certificates[i] = Some(Certificate {
-        //     kind: i.into(),
-        //     cert,
-        // });
-
         current_offset = end_offset;
     }
 
-    Ok(CertificateStore {
+    Ok(CertStore {
         version,
         num_certs: num_certs as u8,
         cert_lengths,

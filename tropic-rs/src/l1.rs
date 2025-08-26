@@ -1,16 +1,21 @@
-use embedded_hal::spi::Error as SpiError;
+use embedded_hal::spi::Error as _;
 
 /// TODO Maximal size of data field in one L2 transfer
 const L2_CHUNK_MAX_DATA_SIZE: usize = 252;
-/// Maximal number of data bytes in one L1 transfer
+/// Minimum number of data bytes in one L1 transfer
+#[allow(unused)]
 const LEN_MIN: usize = 1;
 /// Maximal number of data bytes in one L1 transfer
-const LEN_MAX: usize = 1 + 1 + 1 + L2_CHUNK_MAX_DATA_SIZE + 2;
+pub(crate) const LEN_MAX: usize = 1 + 1 + 1 + L2_CHUNK_MAX_DATA_SIZE + 2;
 
 /// Max number of GET_INFO requests when chip is not answering
-pub const READ_MAX_TRIES: usize = 50; // Increasing from 10 to 50 to cover SPI slave convertor behaviour. TODO put back to 10 in the future
+pub const READ_MAX_TRIES: usize = 10;
 /// Number of ms to wait between each GET_INFO request
 pub const READ_RETRY_DELAY: usize = 25;
+
+/// Maximal timeout when waiting for activity on SPI bus */
+#[allow(unused)]
+const LT_L1_TIMEOUT_MS_MAX: usize = 150;
 
 /// Get response request's ID
 pub const GET_RESPONSE_REQ_ID: u8 = 0xAA;
@@ -24,14 +29,22 @@ const CHIP_MODE_STARTUP_BIT: u8 = 0x04;
 #[derive(Debug)]
 pub enum Error {
     Spi(embedded_hal::spi::ErrorKind),
+    /// Chip is in ALARM
+    AlarmMode,
+    /// Chip is BUSY - typically chip is still booting
+    ChipBusy,
+    /// Data does not have an expected length
     InvalidDataLen,
     TryFromSlice(core::array::TryFromSliceError),
 }
 
+#[cfg(feature = "display")]
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Spi(err) => f.write_fmt(format_args!("spi error: {}", err)),
+            Self::AlarmMode => f.write_str("chip is in alarm mode"),
+            Self::ChipBusy => f.write_str("chip is busy"),
             Self::InvalidDataLen => f.write_str("invalid data length"),
             Self::TryFromSlice(err) => {
                 f.write_fmt(format_args!("unable to convert slice: {}", err))
@@ -57,8 +70,12 @@ pub struct ChipStatus {
 }
 
 impl ChipStatus {
-    pub fn to_mode(&self) -> ChipMode {
-        self.into()
+    pub fn chip_mode(&self) -> ChipMode {
+        if self.start {
+            ChipMode::Startup
+        } else {
+            ChipMode::Application
+        }
     }
 }
 
@@ -74,18 +91,8 @@ impl From<u8> for ChipStatus {
 
 #[derive(Debug, PartialEq)]
 pub enum ChipMode {
-    Maintenance,
-    App,
-}
-
-impl From<&ChipStatus> for ChipMode {
-    fn from(status: &ChipStatus) -> Self {
-        if status.start {
-            Self::Maintenance
-        } else {
-            Self::App
-        }
-    }
+    Startup,
+    Application,
 }
 
 pub(crate) struct Response<const N: usize> {
@@ -113,7 +120,8 @@ pub(crate) fn receive<
     let mut data = [0_u8; N];
     let mut crc = [0_u8; 2];
 
-    loop {
+    while retry > 0 {
+        retry -= 1;
         let mut operations = [
             embedded_hal::spi::Operation::Transfer(&mut chip_status, &req),
             embedded_hal::spi::Operation::TransferInPlace(&mut status),
@@ -127,37 +135,55 @@ pub(crate) fn receive<
             .map_err(|e| Error::Spi(e.kind()))?;
 
         let chip_status: ChipStatus = chip_status[0].into();
-        if !chip_status.ready {
+
+        if chip_status.alarm {
+            return Err(Error::AlarmMode);
+        }
+
+        if chip_status.ready {
+            // len of 0xff means that the chip has no response to send.
             if len[0] == 0xff {
-                retry -= 1;
-                if retry > 0 {
+                delay.delay_ms(READ_RETRY_DELAY as u32);
+                continue;
+            }
+
+            let len_s = len[0] as usize;
+            // TODO: fix up values, data should never be longer then L2_CHUNK_MAX_DATA_SIZE
+            if len_s != N {
+                // data buffer is bigger then received data
+                // crc was appended after data[len_s]
+                crc = match len_s {
+                    // crc is behind len_s
+                    0..=253 => data[len_s..len_s + 2].try_into()?,
+                    // crc is last bit of data + first bit of crc
+                    254 => [data[254], crc[1]],
+                    // crc is already correct
+                    255 => crc,
+                    _ => return Err(Error::InvalidDataLen),
+                };
+            }
+
+            return Ok(Response {
+                chip_status,
+                status: status[0],
+                len: len[0],
+                data,
+                crc,
+            });
+        } else {
+            match chip_status.chip_mode() {
+                ChipMode::Startup => {
                     delay.delay_ms(READ_RETRY_DELAY as u32);
-                    continue;
                 }
-                return Err(Error::InvalidDataLen);
+                ChipMode::Application => {
+                    // TODO: impl LT_USE_INT_PIN
+                    // and wait for interupt pin using LT_L1_TIMEOUT_MS_MAX as timout
+                    delay.delay_ms(READ_RETRY_DELAY as u32);
+                }
             }
         }
-
-        let len_s = len[0] as usize;
-        if len_s != N {
-            // data buffer was bigger then actual data
-            // crc was appended after data[len_s]
-            crc = match len_s {
-                255 => crc,
-                254 => [data[254], crc[1]],
-                0..=253 => data[len_s..len_s + 2].try_into()?,
-                _ => return Err(Error::InvalidDataLen),
-            };
-        }
-
-        return Ok(Response {
-            chip_status: chip_status,
-            status: status[0],
-            len: len[0],
-            data: data,
-            crc: crc,
-        });
     }
+    Err(Error::ChipBusy)
 }
 
 #[cfg(test)]
