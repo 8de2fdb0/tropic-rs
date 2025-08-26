@@ -95,8 +95,8 @@ pub struct DerCertificate<'a> {
     cert: x509_parser::Certificate<'a>,
 }
 
-impl<'a> ErrorType for DerCertificate<'a> {
-    type Error<'b> = Error;
+impl ErrorType for DerCertificate<'_> {
+    type Error<'a> = Error;
 }
 
 impl<'a> Certificate<'a> for DerCertificate<'a> {
@@ -119,18 +119,17 @@ impl ErrorType for DerDecoder {
 impl CertDecoder for DerDecoder {
     type Cert<'a> = DerCertificate<'a>;
 
-    fn from_der_and_kind<'a>(
-        der_buf: &'a [u8],
+    fn from_der_and_kind(
+        der_buf: &[u8],
         kind: CertKind,
-    ) -> Result<Self::Cert<'a>, Self::Error<'a>> {
-        let cert = x509_parser::Certificate::from_der(&der_buf)?;
+    ) -> Result<Self::Cert<'_>, Self::Error<'_>> {
+        let cert = x509_parser::Certificate::from_der(der_buf)?;
         Ok(DerCertificate { kind, cert })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use der::ValueOrd;
     use tropic_rs::cert_store;
 
     use super::*;
@@ -164,7 +163,8 @@ mod tests {
         0x64, 0x69,
     ];
 
-    const DER_2: [u8; 581] = [
+    // TODO: add test for DER_2 through DER_4
+    const _DER_2: [u8; 581] = [
         48, 130, 2, 65, 48, 130, 1, 199, 160, 3, 2, 1, 2, 2, 2, 39, 17, 48, 10, 6, 8, 42, 134, 72,
         206, 61, 4, 3, 3, 48, 90, 49, 11, 48, 9, 6, 3, 85, 4, 6, 19, 2, 67, 90, 49, 29, 48, 27, 6,
         3, 85, 4, 10, 12, 20, 84, 114, 111, 112, 105, 99, 32, 83, 113, 117, 97, 114, 101, 32, 115,
@@ -193,7 +193,7 @@ mod tests {
         165, 129, 209, 126, 93, 179, 247, 64, 185, 119, 185, 70, 231, 59, 24, 232, 148, 216, 241,
         41, 89, 74, 243, 61, 181, 105, 253, 62, 134, 94, 18, 181, 174, 61,
     ];
-    const DER_3: [u8; 626] = [
+    const _DER_3: [u8; 626] = [
         48, 130, 2, 110, 48, 130, 1, 207, 160, 3, 2, 1, 2, 2, 2, 3, 233, 48, 10, 6, 8, 42, 134, 72,
         206, 61, 4, 3, 4, 48, 90, 49, 11, 48, 9, 6, 3, 85, 4, 6, 19, 2, 67, 90, 49, 29, 48, 27, 6,
         3, 85, 4, 10, 12, 20, 84, 114, 111, 112, 105, 99, 32, 83, 113, 117, 97, 114, 101, 32, 115,
@@ -225,7 +225,7 @@ mod tests {
         132, 240, 197, 165, 156, 24, 188, 82, 201, 88, 48, 51, 75, 123, 117, 231, 183, 243, 82,
         115, 182, 204, 122, 19,
     ];
-    const DER_4: [u8; 626] = [
+    const _DER_4: [u8; 626] = [
         48, 130, 2, 110, 48, 130, 1, 208, 160, 3, 2, 1, 2, 2, 1, 101, 48, 10, 6, 8, 42, 134, 72,
         206, 61, 4, 3, 4, 48, 90, 49, 11, 48, 9, 6, 3, 85, 4, 6, 19, 2, 67, 90, 49, 29, 48, 27, 6,
         3, 85, 4, 10, 12, 20, 84, 114, 111, 112, 105, 99, 32, 83, 113, 117, 97, 114, 101, 32, 115,

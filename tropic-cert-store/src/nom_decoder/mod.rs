@@ -30,7 +30,7 @@ impl<'a> core::fmt::Display for Error<'a> {
     }
 }
 
-impl<'a> tropic_rs::cert_store::Error for Error<'a> {
+impl tropic_rs::cert_store::Error for Error<'_> {
     fn kind(&self) -> tropic_rs::cert_store::ErrorKind {
         match self {
             Self::NomParser(_) => tropic_rs::cert_store::ErrorKind::Decoding,
@@ -76,11 +76,11 @@ impl ErrorType for NomDecoder {
 impl CertDecoder for NomDecoder {
     type Cert<'a> = NomCertificate<'a>;
 
-    fn from_der_and_kind<'a>(
-        der_buf: &'a [u8],
+    fn from_der_and_kind(
+        der_buf: &[u8],
         kind: CertKind,
-    ) -> Result<Self::Cert<'a>, Self::Error<'a>> {
-        let cert = nom_parser::extract_x509_certificate_parts(&der_buf)?;
+    ) -> Result<Self::Cert<'_>, Self::Error<'_>> {
+        let cert = nom_parser::extract_x509_certificate_parts(der_buf)?;
         Ok(NomCertificate { kind, cert })
     }
 }

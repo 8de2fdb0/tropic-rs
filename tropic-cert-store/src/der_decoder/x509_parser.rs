@@ -3,7 +3,6 @@ use der::{
     asn1::{AnyRef, BitStringRef, ObjectIdentifier, UintRef},
 };
 use spki::{AlgorithmIdentifierRef, SubjectPublicKeyInfoRef};
-use tropic_rs::cert_store;
 
 const MAX_RDN_ATTRIBUTES: usize = 5;
 const MAX_RDNS: usize = 10;

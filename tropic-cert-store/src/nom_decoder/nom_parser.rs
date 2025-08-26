@@ -106,15 +106,15 @@ impl<'a> From<nom::Err<nom::error::Error<&'a [u8]>>> for Error<'a> {
 }
 
 /// ASN.1 tags
-const ASN1DER_BOOLEAN: u8 = 0x01;
-const TAG_INTEGER: u8 = 0x02;
+// const ASN1DER_BOOLEAN: u8 = 0x01;
+// const TAG_INTEGER: u8 = 0x02;
 const TAG_BIT_STRING: u8 = 0x03;
-const TAG_STRING_OCTET: u8 = 0x04;
-const TAG_STRING_NULL: u8 = 0x05;
+// const TAG_STRING_OCTET: u8 = 0x04;
+// const TAG_STRING_NULL: u8 = 0x05;
 const TAG_OBJECT_IDENTIFIER: u8 = 0x06;
-const TAG_STRING_UTF8: u8 = 0x0C;
-const TAG_STRING_PRINTABLE: u8 = 0x13;
-const TAG_UTC_TIME: u8 = 0x17;
+// const TAG_STRING_UTF8: u8 = 0x0C;
+// const TAG_STRING_PRINTABLE: u8 = 0x13;
+// const TAG_UTC_TIME: u8 = 0x17;
 const TAG_SEQUENCE: u8 = 0x30;
 
 /// X25519 Public-Key in DER: 1.3.101.110
@@ -225,7 +225,7 @@ fn parse_bit_string_contents(input: &[u8]) -> IResult<&[u8], BitString> {
     ))
 }
 
-fn parse_algorithm_identifier<'a>(input: &'a [u8]) -> Result<(&[u8], PubKeyAlgorithm), Error<'a>> {
+fn parse_algorithm_identifier(input: &[u8]) -> Result<(&[u8], PubKeyAlgorithm), Error<'_>> {
     let (input, content) =
         parse_sequence_contents(input).map_err(|_e| Error::MissingAlgorithmIdentifier)?;
 
@@ -256,7 +256,7 @@ pub struct SubjectPublicKeyInfo<'a> {
 }
 
 /// Parses the Ed25519 SubjectPublicKeyInfo from a byte slice.
-fn parse_spki<'a>(input: &'a [u8]) -> Result<SubjectPublicKeyInfo<'a>, Error<'a>> {
+fn parse_spki(input: &[u8]) -> Result<SubjectPublicKeyInfo<'_>, Error<'_>> {
     let (_, spki_content) = parse_sequence_contents(input)?;
 
     let (input, algorithm_identifier) = parse_algorithm_identifier(spki_content)?;
@@ -280,7 +280,7 @@ pub struct Signature<'a> {
     pub sig: BitString<'a>,
 }
 
-fn parse_signature<'a>(input: &'a [u8]) -> Result<(&'a [u8], Signature<'a>), Error<'a>> {
+fn parse_signature(input: &[u8]) -> Result<(&[u8], Signature<'_>), Error<'_>> {
     let (input, content) = parse_sequence_contents(input)?;
     let (_, algorithm_oid) =
         parse_oid(content).map_err(|_e| Error::MissingSignatureAlgorithmTop)?;
@@ -308,7 +308,7 @@ pub struct Certificate<'a> {
 }
 
 /// Top-level extractor
-pub fn extract_x509_certificate_parts<'a>(der: &'a [u8]) -> Result<Certificate<'a>, Error<'a>> {
+pub fn extract_x509_certificate_parts(der: &[u8]) -> Result<Certificate<'_>, Error<'_>> {
     // Certificate ::= SEQUENCE {
     //      tbsCertificate          SEQUENCE,
     //      signatureAlgorithm      SEQUENCE,
@@ -334,7 +334,7 @@ pub fn extract_x509_certificate_parts<'a>(der: &'a [u8]) -> Result<Certificate<'
 
     // Check if version is present (context-specific tag [0] = 0xA0)
     if tbs_contents[offset] == 0xA0 {
-        let (_, ctx0_len) = parse_length(&tbs_contents[offset + 1..]).map_err(|e| Error::Nom(e))?;
+        let (_, ctx0_len) = parse_length(&tbs_contents[offset + 1..]).map_err(Error::Nom)?;
         // move offset past [0] version
         offset += 2 + ctx0_len;
     }
@@ -366,7 +366,7 @@ pub fn extract_x509_certificate_parts<'a>(der: &'a [u8]) -> Result<Certificate<'
 
     // subject public key info (SEQUENCE)
     let (_, spki_full) =
-        parse_sequence_full(&tbs_contents[offset..]).map_err(|e| Error::MissingSPKI)?;
+        parse_sequence_full(&tbs_contents[offset..]).map_err(|_e| Error::MissingSPKI)?;
 
     let spki = parse_spki(spki_full)?;
 
@@ -377,64 +377,9 @@ pub fn extract_x509_certificate_parts<'a>(der: &'a [u8]) -> Result<Certificate<'
         tbs_certificate: tbs_full,
         issuer: issuer_full,
         subject: subject_full,
-        spki: spki,
+        spki,
         validity: validity_full,
         signature,
         raw_der: der,
     })
-}
-
-/// Find the SubjectPublicKeyInfo SEQUENCE by key_oid or sig_oid in tbsCertificate
-pub fn find_subject_public_key_info<'a>(
-    spki_full: &'a [u8],
-    key_oid: &[u8],
-    sig_oid: &[u8],
-) -> Option<&'a [u8]> {
-    // tbsCertificate: parse fields and find SubjectPublicKeyInfo (after subject)
-    let mut offset = 0;
-    // if tbs[offset] == 0xA0 {
-    //     if let Ok((_, ctx0_len)) = parse_length(&tbs[offset + 1..]) {
-    //         offset += 2 + ctx0_len;
-    //     }
-    // }
-    // // serialNumber
-    // if let Ok((_, sn_len)) = parse_length(&tbs[offset + 1..]) {
-    //     offset += 2 + sn_len;
-    // }
-    // // signature AlgorithmIdentifier
-    // if let Ok((_, sigalg_full)) = parse_sequence_full(&tbs[offset..]) {
-    //     offset += sigalg_full.len();
-    // }
-    // // issuer
-    // if let Ok((_, issuer_full)) = parse_sequence_full(&tbs[offset..]) {
-    //     offset += issuer_full.len();
-    // }
-    // // validity
-    // if let Ok((_, validity_full)) = parse_sequence_full(&tbs[offset..]) {
-    //     offset += validity_full.len();
-    // }
-    // // subject
-    // if let Ok((_, subject_full)) = parse_sequence_full(&tbs[offset..]) {
-    //     offset += subject_full.len();
-    // }
-    // SubjectPublicKeyInfo SEQUENCE is next
-    // if let Ok((_, spki_full)) = parse_sequence_full(&tbs[offset..]) {
-    //     // Check AlgorithmIdentifier OID inside SPKI
-    //     if let Ok((_, alg_id_bytes)) = parse_sequence_contents(&spki_full[2..]) {
-    //         if let Ok((_, oid_bytes)) = parse_oid(alg_id_bytes) {
-    //             if oid_bytes == key_oid || oid_bytes == sig_oid {
-    //                 return Some(spki_full);
-    //             }
-    //         }
-    //     }
-    // }
-
-    // if let Ok((_, key_oid)) = parse_sequence_contents(&spki_full[..]) {
-    //     if let Ok((_, oid_bytes)) = parse_oid(alg_id_bytes) {
-    //         if oid_bytes == key_oid || oid_bytes == sig_oid {
-    //             return Some(spki_full);
-    //         }
-    //     }
-    // }
-    None
 }
