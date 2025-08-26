@@ -2,6 +2,7 @@
 
 pub(crate) mod cert;
 pub(crate) mod cert_store;
+pub(crate) mod info;
 
 pub use cert_store::CERT_BUFFER_LEN;
 
@@ -13,6 +14,21 @@ use crate::{
     l1,
 };
 
+// length of the cmd id field.
+pub(crate) const CMD_ID_LEN: usize = 1;
+
+// Length of the cmd size field.
+pub(crate) const CMD_SIZE_LEN: usize = 1;
+
+// Lenght of the cmd crc field.
+pub(crate) const CMD_CRC_LEN: usize = 2;
+
+// TODO Maximal size of data field in one L2 transfer
+pub(crate) const CHUNK_MAX_DATA_SIZE: usize = 252;
+// Maximal size of one l2 frame
+pub(crate) const L2_MAX_FRAME_SIZE: usize =
+    CMD_ID_LEN + CMD_SIZE_LEN + CHUNK_MAX_DATA_SIZE + CMD_CRC_LEN;
+
 #[derive(Debug)]
 pub enum Error {
     Spi(embedded_hal::spi::ErrorKind),
@@ -20,10 +36,15 @@ pub enum Error {
     L1(crate::l1::Error),
     InvalidCRC,
     InvalidStatus(u8),
-    InvalidRespLen(usize, usize),
+    RespErr(Status),
+    RespMaxLoops,
+    EncCmdReqSize(usize, usize),
+    EncCmdRespSize(usize, usize),
     CertStore(cert_store::Error),
+    NoSession,
 }
 
+#[cfg(feature = "display")]
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -31,14 +52,24 @@ impl core::fmt::Display for Error {
             Self::Crc(err) => f.write_fmt(format_args!("crc error: {}", err)),
             Self::L1(err) => f.write_fmt(format_args!("l1 error: {}", err)),
             Self::InvalidCRC => f.write_fmt(format_args!("l2: invalid crc")),
+            Self::EncCmdReqSize(exp, act) => f.write_fmt(format_args!(
+                "l2: invalid encrypted command length: expected {} bytes, got {}",
+                exp, act
+            )),
+            Self::EncCmdRespSize(exp, act) => f.write_fmt(format_args!(
+                "l2: invalid encrypted command response length: expected {} bytes, got {}",
+                exp, act
+            )),
             Self::InvalidStatus(status) => {
                 f.write_fmt(format_args!("l2: invalid status: {}", status))
             }
-            Self::InvalidRespLen(exp, act) => f.write_fmt(format_args!(
-                "l2: invalid response length: expected {} bytes, got {}",
-                exp, act
+            Self::RespErr(status) => f.write_fmt(format_args!(
+                "response contained error status: {:?}",
+                status
             )),
+            Self::RespMaxLoops => f.write_fmt(format_args!("l2: response max loops reached")),
             Self::CertStore(err) => f.write_fmt(format_args!("cert store error: {}", err)),
+            Self::NoSession => f.write_fmt(format_args!("secure session not established")),
         }
     }
 }
@@ -61,69 +92,32 @@ impl From<crate::l1::Error> for Error {
     }
 }
 
-// pub fn receive<SPI: embedded_hal::spi::SpiDevice, const N: usize>(
-//     spi_device: &mut SPI,
-// ) -> Result<[u8; N], Error> {
-//     let mut retry = l1::READ_MAX_TRIES;
-
-//     let req = [l1::GET_RESPONSE_REQ_ID];
-//     let mut chip_status = [0_u8; 1];
-//     let mut status_and_len = [0_u8; 2];
-
-//     let mut data = [0_u8; N];
-//     let mut crc = [0_u8; 2];
-
-//     loop {
-//         let mut operations = [
-//             Operation::Transfer(&mut chip_status, &req),
-//             Operation::TransferInPlace(&mut status_and_len),
-//             Operation::TransferInPlace(&mut data),
-//             Operation::TransferInPlace(&mut crc),
-//         ];
-
-//         spi_device.transaction(&mut operations)?;
-
-//         let len = status_and_len[1] as usize;
-//         if len != data.len() {
-//             retry -= 1;
-//             if retry > 0 {
-//                 continue;
-//             }
-//             return Err(Error::InvalidRespLen(N, data.len()));
-//         }
-
-//         if u8_slice_to_crc(&crc) != crc16(&data, Some(&status_and_len)) {
-//             return Err(Error::InvalidCRC);
-//         }
-
-//         return Ok(data);
-//     }
-// }
-
 #[repr(u8)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Status {
-    /// @brief STATUS ﬁeld value
+    /// Request was sucessfull
     RequestOk = 0x01,
-    /// @brief STATUS ﬁeld value
+    /// Result was successfull
     ResultOk = 0x02,
-    /// @brief STATUS ﬁeld value
+    /// There is more than one chunk to be expected for a current request
     RequestCont = 0x03,
-    /// @brief STATUS ﬁeld value
+    /// There is more than one chunk to be received for a current response
     ResultCont = 0x04,
-    /// @brief STATUS ﬁeld value
+    /// There were an error during handshake establishing
     HskErr = 0x79,
-    /// @brief STATUS ﬁeld value
+    /// There is no secure session
     NoSession = 0x7A,
-    /// @brief STATUS ﬁeld value
+    /// There were error during checking message authenticity
     TagErr = 0x7B,
-    /// @brief STATUS ﬁeld value
+    /// Request contained crc error
     CrcErr = 0x7C,
-    /// @brief STATUS ﬁeld value
+    /// ID of last request is not known to TROPIC01
     UnknownErr = 0x7E,
-    /// @brief STATUS ﬁeld value
+    /// There were some other error
     GenErr = 0x7F,
-    /// @brief STATUS ﬁeld value
+    /// No response on the SPI bus will read as a array full of 0xff
+    /// So if status is 0xff, that means no response.
+    /// TODO: add a real check to see if the whole response is 0xff
     NoResp = 0xFF,
 }
 
@@ -163,11 +157,11 @@ pub(crate) struct Response<const N: usize> {
 }
 
 impl<const N: usize> Response<N> {
-    pub(crate) fn validate(&self) -> Result<(), Error> {
+    pub(crate) fn check_crc(&self) -> Result<(), Error> {
         let status_and_len = [self.status.clone() as u8, self.len];
-        if crc16(&self.data[0..self.len as usize], Some(&status_and_len))
-            != u8_slice_to_crc(&self.crc)
-        {
+        let exp_crc = crc16(&self.data[0..self.len as usize], Some(&status_and_len));
+        let act_crc = u8_slice_to_crc(&self.crc);
+        if exp_crc != act_crc {
             return Err(Error::InvalidCRC);
         }
         Ok(())
@@ -178,164 +172,74 @@ impl<const N: usize> TryFrom<l1::Response<N>> for Response<N> {
     type Error = Error;
 
     fn try_from(resp: l1::Response<N>) -> Result<Self, Self::Error> {
+        let status = Status::try_from(resp.status)?;
+
         let l2_resp = Self {
             chip_status: resp.chip_status,
-            status: Status::try_from(resp.status)?,
+            status,
             len: resp.len,
             data: resp.data,
             crc: resp.crc,
         };
-        l2_resp.validate()?;
+
+        match l2_resp.status {
+            Status::HskErr
+            | Status::TagErr
+            | Status::CrcErr
+            | Status::UnknownErr
+            | Status::GenErr
+            | Status::NoResp => {
+                return Err(Error::RespErr(l2_resp.status));
+            }
+            Status::NoSession => return Err(Error::NoSession),
+            Status::RequestOk | Status::ResultOk => l2_resp.check_crc()?,
+            _ => (),
+        };
+
         Ok(l2_resp)
     }
 }
 
-pub(crate) mod info {
-    use super::*;
-
-    const GET_INFO_REQ_ID: u8 = 0x01;
-    const GET_INFO_REQ_LEN: u8 = 0x02;
-
-    pub(crate) const GET_INFO_BLOCK_LEN: usize = 128;
-
-    #[repr(u8)]
-    pub enum GetInfoObjectId {
-        /// The X.509 chip certificate read from I-Memory and signed by Tropic Square (max length of 512B).
-        X509Certificate = 0x00,
-        /// The chip ID - the chip silicon revision and unique device ID (max length of 128B).
-        ChipId = 0x01,
-        /// The RISCV current running FW version (4 Bytes)
-        RiscvFwVersion = 0x02,
-        /// The SPECT FW version (4 Bytes)
-        SpectFwVersion = 0x04,
-        ///  The FW header read from the selected bank id (shown as an index). Supported only in Start-up mode.
-        FwBank = 0xbe,
-    }
-
-    #[repr(u8)]
-    pub enum DataChunk {
-        /// Request for data bytes 0-127 of the object.
-        Bytes0_127 = 0x00,
-        /// Request for data bytes 128-255 of the object (only needed for the X.509 certificate).
-        Bytes128_255 = 0x01,
-        /// Request for data bytes 128-383 of object (only needed for the X.509 certificate).
-        Bytes256_383 = 0x02,
-        /// Request for data bytes 384-511 of object (only needed for the X.509 certificate).
-        Bytes384_511 = 0x03,
-    }
-
-    impl DataChunk {
-        pub fn next(self) -> Option<Self> {
-            match self {
-                Self::Bytes0_127 => Some(Self::Bytes128_255),
-                Self::Bytes128_255 => Some(Self::Bytes256_383),
-                Self::Bytes256_383 => Some(Self::Bytes384_511),
-                Self::Bytes384_511 => None,
-            }
-        }
-    }
-
-    #[repr(u8)]
-    pub enum BankId {
-        /// Firmware bank 1.
-        FwBankFw1 = 1,
-        /// Firmware bank 2.
-        FwBankFw2 = 2,
-        /// SPECT bank 1.
-        FwBankSpect1 = 17,
-        /// SPECT bank 2.
-        FwBankSpect2 = 18,
-    }
-
-    pub enum BlocIndex {
-        DataChunk(DataChunk),
-        CeryStore(u8),
-        BankId(BankId),
-    }
-
-    impl From<BlocIndex> for u8 {
-        fn from(value: BlocIndex) -> Self {
-            match value {
-                BlocIndex::DataChunk(data_chunk) => data_chunk as u8,
-                BlocIndex::CeryStore(idx) => idx,
-                BlocIndex::BankId(bank_id) => bank_id as u8,
-            }
-        }
-    }
-
-    pub struct GetInfoReq {}
-
-    impl GetInfoReq {
-        pub fn create(
-            object_id: GetInfoObjectId,
-            block_index: BlocIndex,
-        ) -> Result<[u8; 6], Error> {
-            let mut data = [
-                GET_INFO_REQ_ID,
-                GET_INFO_REQ_LEN,
-                object_id as u8,
-                block_index.into(),
-                0,
-                0,
-            ];
-            add_crc(&mut data)?;
-            Ok(data)
-        }
-    }
-
-    pub struct GetInfoResp<const N: usize> {
-        /// CHIP_STATUS byte
-        pub chip_status: l1::ChipStatus,
-        ///  L2 status byte
-        pub status: Status,
-        /// Length of incoming data
-        pub len: u8,
-        /// The data content of the requested object block.
-        pub object: [u8; N],
-        /// Checksum
-        pub crc: [u8; 2],
-    }
-
-    impl<const N: usize> From<Response<N>> for GetInfoResp<N> {
-        fn from(resp: Response<N>) -> Self {
-            let mut pubkey_bytes = [0_u8; 32];
-            pubkey_bytes.copy_from_slice(&resp.data[0..32]);
-            let mut auth_tag = [0_u8; 16];
-            auth_tag.copy_from_slice(&resp.data[32..48]);
-
-            Self {
-                chip_status: resp.chip_status,
-                status: resp.status,
-                len: resp.len,
-                object: resp.data,
-                crc: resp.crc,
-            }
-        }
-    }
+pub(crate) fn receive<
+    SPI: embedded_hal::spi::SpiDevice,
+    D: embedded_hal::delay::DelayNs,
+    const N: usize,
+>(
+    spi_device: &mut SPI,
+    delay: &mut D,
+) -> Result<Response<N>, Error> {
+    l1::receive(spi_device, delay)?.try_into()
 }
 
 pub mod handshake {
     use super::*;
 
     const HANDSHAKE_REQ_ID: u8 = 0x02;
+
+    // KEY[32] KEY_SLOT[1]
     pub const HANDSHAKE_REQ_LEN: u8 = 33;
+
+    // KEY[32] AUTH_TAG[16]
     pub const HANDSHAKE_RSP_LEN: usize = 48;
-    const HANDSHAKE_L2_REQ_LEN: usize = (1 + 1 + HANDSHAKE_REQ_LEN + 2) as usize;
+
+    const HANDSHAKE_CMD_LEN: usize =
+        CMD_ID_LEN + CMD_SIZE_LEN + HANDSHAKE_REQ_LEN as usize + CMD_CRC_LEN;
 
     pub struct HandshakeReq;
 
     impl HandshakeReq {
         pub fn create(
             host_pubkey: x25519_dalek::PublicKey,
-            pkey_index: common::PairingKeyIndex,
-        ) -> Result<[u8; HANDSHAKE_L2_REQ_LEN], Error> {
-            let mut data = [0_u8; HANDSHAKE_L2_REQ_LEN];
+            pairing_key_slot: common::PairingKeySlot,
+        ) -> Result<[u8; HANDSHAKE_CMD_LEN], Error> {
+            let mut data = [0_u8; HANDSHAKE_CMD_LEN];
             data[0] = HANDSHAKE_REQ_ID;
             data[1] = HANDSHAKE_REQ_LEN;
             data[2..34].copy_from_slice(host_pubkey.as_bytes());
-            data[34] = pkey_index as u8;
+            data[34] = pairing_key_slot as u8;
             data[35] = 0;
             data[36] = 0;
+            add_crc(&mut data)?;
             Ok(data)
         }
     }
@@ -348,7 +252,7 @@ pub mod handshake {
         /// Length of incoming data
         pub len: u8,
         /// TROPIC01's X25519 Ephemeral key
-        pub tropic_pubkey: x25519_dalek::PublicKey,
+        pub et_pubkey: x25519_dalek::PublicKey,
         /// The Secure Channel Handshake Authentication Tag
         pub auth_tag: [u8; 16],
         /// Checksum
@@ -357,8 +261,8 @@ pub mod handshake {
 
     impl From<Response<{ HANDSHAKE_RSP_LEN }>> for HandshakeResp {
         fn from(resp: Response<{ HANDSHAKE_RSP_LEN }>) -> Self {
-            let mut pubkey_bytes = [0_u8; 32];
-            pubkey_bytes.copy_from_slice(&resp.data[0..32]);
+            let mut et_pubkey = [0_u8; 32];
+            et_pubkey.copy_from_slice(&resp.data[0..32]);
             let mut auth_tag = [0_u8; 16];
             auth_tag.copy_from_slice(&resp.data[32..48]);
 
@@ -366,7 +270,7 @@ pub mod handshake {
                 chip_status: resp.chip_status,
                 status: resp.status,
                 len: resp.len,
-                tropic_pubkey: pubkey_bytes.into(),
+                et_pubkey: et_pubkey.into(),
                 auth_tag,
                 crc: resp.crc,
             }
@@ -380,7 +284,7 @@ pub mod sleep {
     const SLEEP_REQ_ID: u8 = 0x20;
     const SLEEP_REQ_LEN: u8 = 0x01;
 
-    const SLEEP_RSP_LEN: u8 = 0x00;
+    const SLEEP_RSP_LEN: usize = 0x00;
 
     #[repr(u8)]
     pub enum SleepKind {
@@ -401,46 +305,41 @@ pub mod sleep {
 
     pub struct SleepResp {
         /// CHIP_STATUS byte
-        pub chip_status: u8,
+        pub chip_status: l1::ChipStatus,
         /// L2 status byte
-        pub status: u8,
+        pub status: Status,
         /// Length of incoming data
         pub len: u8,
         /// Checksum
         pub crc: [u8; 2],
     }
 
-    impl SleepResp {
-        pub fn new(chip_status: u8, status: u8, len: u8, crc: [u8; 2]) -> Result<Self, Error> {
-            Ok(Self {
-                chip_status,
-                status,
-                len,
-                crc,
-            })
-        }
-
-        pub fn validate(&self) -> Result<(), Error> {
-            let status_and_len = [self.status, self.len];
-            if crc16(&[], Some(&status_and_len)) != u8_slice_to_crc(&self.crc) {
-                return Err(Error::InvalidCRC);
+    impl From<Response<{ SLEEP_RSP_LEN }>> for SleepResp {
+        fn from(resp: Response<{ SLEEP_RSP_LEN }>) -> Self {
+            Self {
+                chip_status: resp.chip_status,
+                status: resp.status,
+                len: resp.len,
+                crc: resp.crc,
             }
-            Ok(())
         }
     }
 }
 
 // todo: think about renaming to reboot
-pub mod startup {
+pub mod restart {
     use super::*;
 
     const STARTUP_REQ_ID: u8 = 0xb3;
     const STARTUP_REQ_LEN: u8 = 0x1;
 
-    const _STARTUP_RSP_LEN: u8 = 0x0;
+    pub(crate) const STARTUP_RSP_LEN: usize = 0x0;
+
+    const STARTUP_CMD_LEN: usize =
+        CMD_ID_LEN + CMD_SIZE_LEN + STARTUP_REQ_LEN as usize + CMD_CRC_LEN;
 
     #[repr(u8)]
-    pub enum StartupId {
+    pub enum RestartMode {
         Reboot = 0x01,
         Maintanance = 0x03,
     }
@@ -449,7 +348,7 @@ pub mod startup {
     pub struct StartupReq;
 
     impl StartupReq {
-        pub fn create(startup_id: StartupId) -> Result<[u8; 5], Error> {
+        pub fn create(startup_id: RestartMode) -> Result<[u8; STARTUP_CMD_LEN], Error> {
             let mut data = [STARTUP_REQ_ID, STARTUP_REQ_LEN, startup_id as u8, 0, 0];
             add_crc(&mut data)?;
             Ok(data)
@@ -459,29 +358,23 @@ pub mod startup {
     /// Response from TROPIC01 afyer requesting a reset.
     pub struct StartupResp {
         /// CHIP_STATUS byte
-        pub chip_status: u8,
+        pub chip_status: l1::ChipStatus,
         /// L2 status byte
-        pub status: u8,
+        pub status: Status,
         /// Length of incoming data
         pub len: u8,
         /// Checksum
         pub crc: [u8; 2],
     }
-    impl StartupResp {
-        pub fn new(chip_status: u8, status: u8, len: u8, crc: [u8; 2]) -> Result<Self, Error> {
-            Ok(Self {
-                chip_status,
-                status,
-                len,
-                crc,
-            })
-        }
-        pub fn validate(&self) -> Result<(), Error> {
-            let status_and_len = [self.status, self.len];
-            if crc16(&[], Some(&status_and_len)) != u8_slice_to_crc(&self.crc) {
-                return Err(Error::InvalidCRC);
+
+    impl From<Response<{ STARTUP_RSP_LEN }>> for StartupResp {
+        fn from(resp: Response<{ STARTUP_RSP_LEN }>) -> Self {
+            Self {
+                chip_status: resp.chip_status,
+                status: resp.status,
+                len: resp.len,
+                crc: resp.crc,
             }
-            Ok(())
         }
     }
 }
@@ -492,13 +385,16 @@ pub mod log {
     const GET_LOG_REQ_ID: u8 = 0xa2;
     const GET_LOG_REQ_LEN: u8 = 0x00;
 
-    pub(crate) const GET_LOG_RSP_MIN_LEN: usize = 0x00;
+    const GET_LOG_RSP_MIN_LEN: usize = 0x00;
     pub(crate) const GET_LOG_RSP_MAX_LEN: usize = 0xff;
+
+    const GET_LOG_CMD_LEN: usize =
+        CMD_ID_LEN + CMD_SIZE_LEN + GET_LOG_REQ_LEN as usize + CMD_CRC_LEN;
 
     pub struct GetLogReq;
 
     impl GetLogReq {
-        pub fn create() -> Result<[u8; 4], Error> {
+        pub fn create() -> Result<[u8; GET_LOG_CMD_LEN], Error> {
             let mut data = [GET_LOG_REQ_ID, GET_LOG_REQ_LEN, 0, 0];
             add_crc(&mut data)?;
             Ok(data)
@@ -543,276 +439,322 @@ pub mod log {
     }
 }
 
-pub(crate) mod resp {
-    use core::fmt;
-
-    use crate::{
-        crc16::{crc16, u8_slice_to_crc},
-        l1::ChipStatus,
-    };
+pub mod enc_cmd {
+    use crate::l3;
 
     use super::*;
 
-    pub const GET_INFO_CHIP_INFO_ID_SIZE: usize = 128;
-    pub const GET_INFO_RISCV_FW_SIZE: usize = 4;
-    pub const GET_INFO_SPECT_FW_SIZE: usize = 4;
-    pub const GET_INFO_FW_HEADER_SIZE: usize = 20;
+    const ENCRYPTED_CMD_REQ_ID: u8 = 0x04;
 
-    pub struct InfoResp<const N: usize> {
+    const ENCRYPTED_CMD_REQ_LEN_MIN: usize = 19;
+    const ENCRYPTED_CMD_REQ_CMD_CIPHERTEXT_LEN_MIN: usize = 1;
+
+    /** Maximal length of field cmd_ciphertext */
+    const ENCRYPTED_CMD_REQ_CMD_CIPHERTEXT_LEN_MAX: usize = 4096;
+
+    const ENCRYPTED_CMD_RSP_LEN_MIN: usize = 19;
+
+    const MAX_CHUNKS: usize = l3::FRAME_MAX_LEN.div_ceil(CHUNK_MAX_DATA_SIZE);
+
+    const ENCRYPTED_RESP_LEN: usize = CHUNK_MAX_DATA_SIZE + 3;
+
+    // Safety number - limit number of loops during l3 chunks reception. TROPIC01 divides data into 128B
+    // chunks, length of L3 buffer is (2 + 4096 + 16).
+    // Divided by typical chunk length: (2 + 4096 + 16) / 128 => 32,
+    // with a few added loops it is set to 42
+    //
+    const MAX_LOOPS: usize = 42;
+
+    fn process_chunk(chunk: &[u8], buf: &mut [u8; CHUNK_MAX_DATA_SIZE + 4]) -> Result<(), Error> {
+        let chunk_len = chunk.len();
+
+        buf[0] = ENCRYPTED_CMD_REQ_ID;
+        buf[1] = chunk_len as u8;
+        buf[2..chunk_len + 2].copy_from_slice(chunk);
+        buf[chunk_len + 2] = 0;
+        buf[chunk_len + 3] = 0;
+        add_crc(buf)?;
+        Ok(())
+    }
+
+    pub struct EncryptedCmdReq {
+        pub count: usize,
+        pub last_len: usize,
+        pub chunks: [[u8; CHUNK_MAX_DATA_SIZE + 4]; MAX_CHUNKS],
+    }
+
+    impl EncryptedCmdReq {
+        pub fn create<const N: usize>(enc_cmd: &l3::Request<N>) -> Result<Self, Error> {
+            if enc_cmd.size as usize > l3::PACKET_MAX_LEN {
+                return Err(Error::EncCmdReqSize(
+                    l3::PACKET_MAX_LEN,
+                    enc_cmd.size as usize,
+                ));
+            }
+
+            let mut chunks = [[0u8; CHUNK_MAX_DATA_SIZE + 4]; MAX_CHUNKS];
+            let mut last_chunk_len = 0usize;
+            let mut chunks_count = 0;
+
+            let size_as_u8_arr = enc_cmd.size.to_le_bytes();
+
+            let mut l3_cmd_stream = size_as_u8_arr
+                .iter()
+                .copied()
+                .chain(enc_cmd.data[..enc_cmd.size as usize].iter().copied())
+                .chain(enc_cmd.tag.iter().copied());
+
+            while let Some(next_byte) = l3_cmd_stream.next() {
+                let mut chunk_buffer = [0u8; CHUNK_MAX_DATA_SIZE];
+                chunk_buffer[0] = next_byte;
+                let mut current_len = 1;
+
+                for (i, b) in l3_cmd_stream
+                    .by_ref()
+                    .take(CHUNK_MAX_DATA_SIZE - 1)
+                    .enumerate()
+                {
+                    chunk_buffer[i + 1] = b;
+                    current_len += 1;
+                }
+
+                if current_len < CHUNK_MAX_DATA_SIZE {
+                    // store last chunk size
+                    // CMD_ID[1] + REQ_LEN[1] + data_len + CRC[2]
+                    last_chunk_len = current_len + 4;
+                }
+
+                process_chunk(&chunk_buffer[..current_len], &mut chunks[chunks_count])?;
+                chunks_count += 1;
+            }
+
+            Ok(Self {
+                count: chunks_count,
+                last_len: last_chunk_len,
+                chunks,
+            })
+        }
+    }
+
+    pub struct EncryptedCmdResp {
         /// CHIP_STATUS byte
-        pub chip_status: ChipStatus,
-        ///  L2 status byte
+        pub chip_status: l1::ChipStatus,
+        /// L2 status byte
         pub status: Status,
         /// Length of incoming data
         pub len: u8,
-        /// The data content of the requested object block.
-        pub object: [u8; N],
+        /// encrypted response chunk
+        pub data: [u8; 255],
         /// Checksum
         pub crc: [u8; 2],
     }
 
-    impl<const N: usize> InfoResp<N> {
-        pub fn new(
-            chip_status: u8,
-            status: u8,
-            len: u8,
-            data: [u8; N],
-            crc: [u8; 2],
-        ) -> Result<Self, Error> {
-            Ok(Self {
-                chip_status: chip_status.into(),
-                status: status.try_into()?,
-                len,
-                object: data,
-                crc,
-            })
-        }
-
-        pub fn validate(&self) -> Result<(), Error> {
-            if crc16(&self.object[0..self.len as usize], None) != u8_slice_to_crc(&self.crc) {
-                return Err(Error::InvalidCRC);
-            }
-            Ok(())
-        }
-    }
-
-    pub struct SerialNumber {
-        /// 8 bits for serial number
-        pub sn: u8,
-        /// 12 bits fab ID, 12 bits part number ID
-        pub fab_data: [u8; 3],
-        /// 16 bits for fabrication date
-        pub fab_date: u16,
-        /// 40 bits for lot ID
-        pub lot_id: [u8; 5],
-        /// 8 bits for wafer ID
-        pub wafer_id: u8,
-        /// 16 bits for x-coordinate
-        pub x_coord: u16,
-        /// 16 bits for y-coordinate
-        pub y_coord: u16,
-    }
-
-    impl core::fmt::Display for SerialNumber {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_fmt(format_args!(
-                "sn: {}, fab_date: {}, lot_id: {:?}, wafer_id: {}, x_coord: {}, y_coord: {}",
-                self.sn, self.fab_date, self.lot_id, self.wafer_id, self.x_coord, self.y_coord
-            ))
-        }
-    }
-
-    impl From<[u8; 16]> for SerialNumber {
-        fn from(data: [u8; 16]) -> Self {
+    impl From<Response<{ ENCRYPTED_RESP_LEN }>> for EncryptedCmdResp {
+        fn from(resp: Response<{ ENCRYPTED_RESP_LEN }>) -> Self {
             Self {
-                sn: data[0],
-                fab_data: [data[1], data[2], data[3]],
-                fab_date: u16::from_le_bytes([data[4], data[5]]),
-                lot_id: [data[6], data[7], data[8], data[9], data[10]],
-                wafer_id: data[11],
-                x_coord: u16::from_le_bytes([data[12], data[13]]),
-                y_coord: u16::from_le_bytes([data[14], data[15]]),
+                chip_status: resp.chip_status,
+                status: resp.status,
+                len: resp.len,
+                data: resp.data,
+                crc: resp.crc,
             }
         }
     }
 
-    pub struct Provisioning {
-        /// Provisioning template version.
-        pub prov_templ_ver: [u8; 2],
-        /// Provisioning template tag.
-        pub prov_templ_tag: [u8; 4],
-        /// Provisioning specification version.
-        pub prov_spec_ver: [u8; 2],
-        /// Provisioning specification tag.
-        pub prov_spec_tag: [u8; 4],
-    }
+    pub(crate) fn receive<
+        SPI: embedded_hal::spi::SpiDevice,
+        D: embedded_hal::delay::DelayNs,
+        const N: usize,
+    >(
+        spi_device: &mut SPI,
+        delay: &mut D,
+        buff: &mut [u8; N],
+    ) -> Result<(), Error> {
+        let mut offset: usize = 0;
+        let mut seek: usize = 0;
 
-    impl core::fmt::Display for Provisioning {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_fmt(format_args!(
-                "prov_templ_ver: {}.{}, prov_spec_ver: {}.{}",
-                self.prov_templ_ver[0],
-                self.prov_templ_ver[1],
-                self.prov_spec_ver[0],
-                self.prov_spec_ver[1]
-            ))
-        }
-    }
+        let mut loops: usize = 0;
+        loop {
+            loops += 1;
+            if loops > MAX_LOOPS {
+                return Err(Error::RespMaxLoops);
+            }
 
-    impl From<[u8; 16]> for Provisioning {
-        fn from(data: [u8; 16]) -> Self {
-            Self {
-                prov_templ_ver: [data[0], data[1]],
-                prov_templ_tag: [data[2], data[3], data[4], data[5]],
-                prov_spec_ver: [data[6], data[7]],
-                prov_spec_tag: [data[8], data[9], data[10], data[11]],
+            let resp: EncryptedCmdResp = super::receive(spi_device, delay)?.into();
+
+            if buff.len() < offset + resp.len as usize {
+                // make sure buff is large enough
+                return Err(Error::EncCmdRespSize(
+                    buff.len(),
+                    offset + resp.len as usize,
+                ));
+            }
+            match resp.status {
+                Status::ResultCont => {
+                    seek += resp.len as usize;
+                    buff[offset..seek].copy_from_slice(&resp.data[..seek]);
+                    offset += seek;
+                }
+                Status::ResultOk => {
+                    seek += resp.len as usize;
+                    buff[offset..seek].copy_from_slice(&resp.data[..seek]);
+                    return Ok(());
+                }
+                _ => return Err(Error::RespErr(resp.status)),
             }
         }
     }
 
-    pub struct ChipId {
-        /// CHIP_ID structure versioning (32 bits), defined by Tropic Square in BP.
-        pub chip_id_ver: [u8; 4], //  [0x01_u8, 0x02, 0x03, 0x04];
-        /// Factory level test info (128 bits), structure retrieved from silicon provider.
-        pub fl_chip_info: [u8; 16],
-        /// Manufacturing level test info (128 bits), structure retrieved from test line and BP.
-        pub func_test_info: [u8; 8],
-        /// Silicon revision (32 bits).
-        pub silicon_rev: [u8; 4],
-        /// Package Type ID deﬁned by Tropic Square
-        pub packg_type_id: [u8; 2],
-        /// Reserved field 1 (16 bits).
-        pub rfu_1: [u8; 2],
-        /// Provisioning info (128 bits), filled by the provisioning station.
-        /// - 8 bits: Provisioning info version.
-        /// - 12 bits: Fabrication ID.
-        /// - 12 bits: Part Number ID.
-        pub prov_ver_fab_id_pn: [u8; 4],
-        /// Provisioning date (16 bits).
-        pub provisioning_date: [u8; 2],
-        /// HSM version (32 bits).
-        /// Byte 0: RFU, Byte 1: Major version, Byte 2: Minor version, Byte 3: Patch version
-        pub hsm_ver: [u8; 4],
-        /// Program version (32 bits).
-        pub prog_ver: [u8; 4],
-        /// Reserved field 2 (16 bits).
-        pub rfu_2: [u8; 2],
-        /// Serial Number (128 bits).
-        pub ser_num: SerialNumber,
-        ///  Part Number (128 bits), defined by Tropic Square in BP.
-        pub part_num_data: [u8; 16],
-        /// Provisioning Data version (96 bits).
-        /// Defined by Tropic Square for each batch in BP.
-        pub prov: Provisioning,
-        /// Batch ID (40 bits).
-        pub batch_id: [u8; 5],
-        /// Reserved field 3 (24 bits).
-        pub rfu_3: [u8; 3],
-        /// Padding (192 bits).
-        pub rfu_4: [u8; 24],
-    }
+    #[cfg(test)]
+    pub(crate) mod tests {
+        use super::*;
 
-    impl core::fmt::Display for ChipId {
-        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-            f.write_fmt(format_args!(
-                "chip_id_ver: {}.{}.{}.{}\r\n",
-                self.chip_id_ver[0], self.chip_id_ver[1], self.chip_id_ver[2], self.chip_id_ver[3]
-            ))?;
-            f.write_fmt(format_args!("fl_chip_info: {:?}\r\n", self.fl_chip_info))?;
-            f.write_fmt(format_args!(
-                "func_test_info: {:?}\r\n",
-                self.func_test_info
-            ))?;
-            f.write_fmt(format_args!(
-                "silicon_rev: {}.{}.{}.{}\r\n",
-                self.silicon_rev[0], self.silicon_rev[1], self.silicon_rev[2], self.silicon_rev[3]
-            ))?;
-            f.write_fmt(format_args!(
-                "packg_type_id: {}.{}\r\n",
-                self.packg_type_id[0], self.packg_type_id[1]
-            ))?;
-            f.write_fmt(format_args!(
-                "rfu_1: {}.{}\r\n",
-                self.rfu_1[0], self.rfu_1[1]
-            ))?;
-            f.write_fmt(format_args!(
-                "prov_ver_fab_id_pn: {}.{}.{}.{}\r\n",
-                self.prov_ver_fab_id_pn[0],
-                self.prov_ver_fab_id_pn[1],
-                self.prov_ver_fab_id_pn[2],
-                self.prov_ver_fab_id_pn[3]
-            ))?;
-            f.write_fmt(format_args!(
-                "provisioning_date: {}.{}\r\n",
-                self.provisioning_date[0], self.provisioning_date[1]
-            ))?;
-            f.write_fmt(format_args!(
-                "hsm_ver: {}.{}.{}.{}\r\n",
-                self.hsm_ver[0], self.hsm_ver[1], self.hsm_ver[2], self.hsm_ver[3]
-            ))?;
-            f.write_fmt(format_args!(
-                "prog_ver: {}.{}.{}.{}\r\n",
-                self.prog_ver[0], self.prog_ver[1], self.prog_ver[2], self.prog_ver[3]
-            ))?;
-            f.write_fmt(format_args!(
-                "rfu_2: {}.{}\r\n",
-                self.rfu_2[0], self.rfu_2[1]
-            ))?;
-            f.write_fmt(format_args!("ser_num: {}\r\n", self.ser_num))?;
-            f.write_fmt(format_args!("part_num_data: {:?}\r\n", self.part_num_data))?;
-            f.write_fmt(format_args!("prov: {}\r\n", self.prov))?;
-            f.write_fmt(format_args!("batch_id: {:?}\r\n", self.batch_id))?;
-            f.write_fmt(format_args!("rfu_3: {:?}\r\n", self.rfu_3))?;
-            f.write_fmt(format_args!("rfu_4: {:?}\r\n", self.rfu_4))
+        const TEST_TAG: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
+        fn expected_chunk(
+            prefix: &[u8],
+            data: &[u8],
+            suffix: &[u8],
+        ) -> [u8; CHUNK_MAX_DATA_SIZE + 4] {
+            let mut chunk = [0_u8; CHUNK_MAX_DATA_SIZE + 4];
+            chunk[0..prefix.len()].copy_from_slice(prefix);
+            chunk[prefix.len()..prefix.len() + data.len()].copy_from_slice(data);
+            chunk[prefix.len() + data.len()..prefix.len() + data.len() + suffix.len()]
+                .copy_from_slice(suffix);
+            chunk
         }
-    }
 
-    impl From<[u8; 128]> for ChipId {
-        fn from(data: [u8; 128]) -> Self {
-            Self {
-                chip_id_ver: [data[0], data[1], data[2], data[3]],
-                fl_chip_info: [
-                    data[4], data[5], data[6], data[7], data[8], data[9], data[10], data[11],
-                    data[12], data[13], data[14], data[15], data[16], data[17], data[18], data[19],
-                ],
-                func_test_info: [
-                    data[20], data[21], data[22], data[23], data[24], data[25], data[26], data[27],
-                ],
-                silicon_rev: [data[28], data[29], data[30], data[31]],
-                packg_type_id: [data[32], data[33]],
-                rfu_1: [data[34], data[35]],
-                prov_ver_fab_id_pn: [data[36], data[37], data[38], data[39]],
-                provisioning_date: [data[40], data[41]],
-                hsm_ver: [data[42], data[43], data[44], data[45]],
-                prog_ver: [data[46], data[47], data[48], data[49]],
-                rfu_2: [data[50], data[51]],
-                ser_num: SerialNumber::from([
-                    data[52], data[53], data[54], data[55], data[56], data[57], data[58], data[59],
-                    data[56], data[57], data[58], data[59], data[60], data[61], data[62], data[63],
-                ]),
-                part_num_data: [
-                    data[64], data[65], data[66], data[67], data[68], data[69], data[70], data[71],
-                    data[72], data[73], data[74], data[75], data[76], data[77], data[78], data[79],
-                ],
-                prov: Provisioning::from([
-                    data[80], data[81], data[82], data[83], data[84], data[85], data[86], data[87],
-                    data[88], data[89], data[90], data[91], data[92], data[93], data[94], data[95],
-                ]),
-                batch_id: [data[96], data[97], data[98], data[99], data[100]],
-                rfu_3: [data[101], data[102], data[103]],
-                rfu_4: [
-                    data[104], data[105], data[106], data[107], data[108], data[109], data[110],
-                    data[111], data[112], data[113], data[114], data[115], data[116], data[117],
-                    data[118], data[119], data[120], data[121], data[122], data[123], data[124],
-                    data[125], data[126], data[127],
-                ],
+        fn create_data<const N: usize>() -> [u8; N] {
+            let mut data = [0_u8; N];
+            for i in 0..N {
+                data[i] = i as u8;
             }
+            data
         }
-    }
 
-    impl From<Response<{ GET_INFO_CHIP_INFO_ID_SIZE }>> for ChipId {
-        fn from(resp: Response<{ GET_INFO_CHIP_INFO_ID_SIZE }>) -> Self {
-            Self::from(resp.data)
+        fn calc_last_chunk_len(data_len: usize) -> usize {
+            CMD_ID_LEN
+                + CMD_SIZE_LEN
+                + (l3::CMD_SIZE_LEN + data_len + l3::TAG_LEN) % CHUNK_MAX_DATA_SIZE
+                + CMD_CRC_LEN
+        }
+
+        #[test]
+        fn test_enc_cmd_req_create_with_one_chunk() {
+            let data = create_data::<10>();
+
+            let enc_cmd = l3::Request {
+                size: 10,
+                data,
+                tag: TEST_TAG,
+            };
+
+            let expected = expected_chunk(
+                &[4, 28, 10, 0],
+                &data,
+                &[
+                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 101, 218,
+                ],
+            );
+
+            let enc_cmd_chunks = EncryptedCmdReq::create(&enc_cmd).unwrap();
+
+            assert_eq!(enc_cmd_chunks.count, 1);
+            assert_eq!(enc_cmd_chunks.last_len, calc_last_chunk_len(10));
+            assert_eq!(enc_cmd_chunks.chunks[0], expected);
+        }
+
+        #[test]
+        fn test_enc_cmd_req_create_with_two_chunks() {
+            let data = create_data::<300>();
+
+            let enc_cmd = l3::Request {
+                size: 300,
+                data: data.clone(),
+                tag: TEST_TAG,
+            };
+
+            let expected0 = expected_chunk(&[4, 252, 44, 1], &data[..250], &[115, 127]);
+            let expected1 = expected_chunk(
+                &[4, 66],
+                &data[250..],
+                &[
+                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 55, 121,
+                ],
+            );
+
+            let enc_cmd_chunks = EncryptedCmdReq::create(&enc_cmd).unwrap();
+
+            assert_eq!(enc_cmd_chunks.count, 2);
+            assert_eq!(enc_cmd_chunks.last_len, calc_last_chunk_len(300));
+            assert_eq!(enc_cmd_chunks.chunks[0], expected0);
+            assert_eq!(enc_cmd_chunks.chunks[1], expected1);
+        }
+
+        #[test]
+        fn test_enc_cmd_req_create_with_three_chunks() {
+            let data = create_data::<550>();
+
+            let enc_cmd = l3::Request {
+                size: 550,
+                data: data.clone(),
+                tag: TEST_TAG,
+            };
+
+            let expected0 = expected_chunk(&[4, 252, 38, 2], &data[..250], &[178, 10]);
+            let expected1 = expected_chunk(&[4, 252], &data[250..502], &[200, 60]);
+
+            let expected2 = expected_chunk(
+                &[4, 64],
+                &data[502..],
+                &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 8, 13],
+            );
+
+            let enc_cmd_chunks = EncryptedCmdReq::create(&enc_cmd).unwrap();
+
+            assert_eq!(enc_cmd_chunks.count, 3);
+            assert_eq!(enc_cmd_chunks.last_len, calc_last_chunk_len(550));
+            assert_eq!(enc_cmd_chunks.chunks[0], expected0);
+            assert_eq!(enc_cmd_chunks.chunks[1], expected1);
+            assert_eq!(enc_cmd_chunks.chunks[2], expected2);
+        }
+
+        #[test]
+        fn test_enc_cmd_req_crc() {
+            let data = [57, 3, 239, 186, 146];
+
+            let test_tag = [
+                90, 215, 123, 185, 236, 247, 28, 119, 1, 225, 58, 212, 192, 22, 80, 185,
+            ];
+
+            let plaintext_cmd = l3::Request {
+                size: 5,
+                data: data.clone(),
+                tag: test_tag,
+            };
+
+            let expected_chunk0 = expected_chunk(
+                &[4, 23, 5, 0],
+                &data,
+                &[
+                    90, 215, 123, 185, 236, 247, 28, 119, 1, 225, 58, 212, 192, 22, 80, 185, 23, 91,
+                ],
+            );
+
+            let enc_cmd_chunks = EncryptedCmdReq::create(&plaintext_cmd)
+                .expect("unable to create encrypted command request");
+            assert_eq!(enc_cmd_chunks.count, 1);
+            assert_eq!(enc_cmd_chunks.last_len, calc_last_chunk_len(5));
+            assert_eq!(enc_cmd_chunks.chunks[0], expected_chunk0);
+
+            let mut crc_data = [
+                4, 23, 5, 0, 57, 3, 239, 186, 146, 90, 215, 123, 185, 236, 247, 28, 119, 1, 225,
+                58, 212, 192, 22, 80, 185, 0, 0,
+            ];
+
+            add_crc(&mut crc_data).expect("unable to create crc");
+            assert_eq!(crc_data[25], 23);
+            assert_eq!(crc_data[26], 91);
         }
     }
 }

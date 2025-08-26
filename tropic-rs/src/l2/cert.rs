@@ -16,7 +16,7 @@ pub trait Error: Debug {
 /// free to define more specific or additional error types. However, by providing
 /// a mapping to these common errors, generic code can still react to them.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-// #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+// #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[non_exhaustive]
 pub enum ErrorKind {
     /// Certidficate couyld not be decoded.
@@ -84,9 +84,22 @@ impl From<usize> for CertKind {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum PubKeyAlgorithm {
+    X25519Pubkey,
+    EcPubkeyP384,
+    EcPubkeyP521,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SubjectPubkey<'a> {
+    pub algorithm: PubKeyAlgorithm,
+    pub public_key: &'a [u8],
+}
+
 pub trait Certificate<'a>: ErrorType + Sized {
     fn kind(&self) -> &CertKind;
-    fn pubkey(&self) -> Result<&[u8], Self::Error<'a>>;
+    fn pubkey(&self) -> Result<SubjectPubkey<'a>, Self::Error<'a>>;
 }
 
 pub trait CertDecoder: ErrorType + Sized {
@@ -96,4 +109,60 @@ pub trait CertDecoder: ErrorType + Sized {
         der_buf: &'a [u8],
         kind: CertKind,
     ) -> Result<Self::Cert<'a>, Self::Error<'a>>;
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use core::convert::Infallible;
+
+    impl super::Error for Infallible {
+        fn kind(&self) -> super::ErrorKind {
+            super::ErrorKind::Other
+        }
+    }
+
+    pub(crate) struct MockCertificate<'a> {
+        kind: CertKind,
+        pubkey: &'a [u8],
+    }
+
+    impl<'a> ErrorType for MockCertificate<'a> {
+        type Error<'b> = core::convert::Infallible;
+    }
+
+    impl<'a> Certificate<'a> for MockCertificate<'a> {
+        fn kind(&self) -> &CertKind {
+            &self.kind
+        }
+        fn pubkey(&self) -> Result<SubjectPubkey<'a>, Self::Error<'_>> {
+            Ok(SubjectPubkey {
+                algorithm: PubKeyAlgorithm::X25519Pubkey,
+                public_key: self.pubkey,
+            })
+        }
+    }
+
+    pub(crate) struct MockDecoder {
+        kind: CertKind,
+        pubkey: [u8; 32],
+    }
+
+    impl ErrorType for MockDecoder {
+        type Error<'a> = core::convert::Infallible;
+    }
+
+    impl CertDecoder for MockDecoder {
+        type Cert<'a> = MockCertificate<'a>;
+
+        fn from_der_and_kind<'a>(
+            der_buf: &'a [u8],
+            kind: CertKind,
+        ) -> Result<Self::Cert<'a>, Self::Error<'a>> {
+            Ok(MockCertificate {
+                pubkey: der_buf,
+                kind,
+            })
+        }
+    }
 }

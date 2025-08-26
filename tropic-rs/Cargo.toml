@@ -12,7 +12,19 @@ rand_core_compat = { version = "0.1", default-features = false, features = [
     "rand_core_0_6",
     "rand_core_0_9",
 ] }
-x25519-dalek = { version = "2", default-features = false }
+x25519-dalek = { version = "2", default-features = false, features = [
+    "static_secrets",
+] }
+ed25519-dalek = { version = "2", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+hkdf = { version = "0.12", default-features = false }
+hmac = { version = "0.12", default-features = false }
+aes-gcm = { version = "0.10", default-features = false, features = ["aes"] }
+
+# generic-array = { version = "0.14", default-features = false }
+bitflag-attr = { version = "0.12", default-features = false }
+
+
 defmt = { version = "1", optional = true }
 
 [dev-dependencies]
