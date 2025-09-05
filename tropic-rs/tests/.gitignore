@@ -1,0 +1,3 @@
+# ignore all file emitted by ts-tvl model_server 
+*.log
+**/.model_config_save.yaml
