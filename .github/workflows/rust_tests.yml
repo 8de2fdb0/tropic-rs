@@ -1,0 +1,144 @@
+# .github/workflows/rust.yml
+
+name: Rust CI
+
+# Controls when the workflow will run
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# Environment variables available to all jobs
+env:
+  # The path to the crate we want to test
+  CRATE_PATH: ./tropic-rs
+  # The path to the devcontainer Dockerfile
+  DEVCONTAINER_PATH: ./.devcontainer
+  # Name for the docker image we will build
+  DOCKER_IMAGE_NAME: tropic-rust-dev-container
+
+jobs:
+  #################################################################
+  # Job 1: Build and Cache the Docker Image
+  #################################################################
+  build_docker_image:
+    name: Build Dev Container
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.get_tag.outputs.TAG }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate image tag from Dockerfile hash
+        id: get_tag
+        run: echo "TAG=${{ env.DOCKER_IMAGE_NAME }}:$(sha256sum ${{ env.DEVCONTAINER_PATH }}/Dockerfile | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ steps.get_tag.outputs.TAG }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.DEVCONTAINER_PATH }}
+          file: ${{ env.DEVCONTAINER_PATH }}/Dockerfile
+          push: false
+          load: true
+          tags: ${{ steps.get_tag.outputs.TAG }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Save Docker image as an artifact
+        run: |
+          docker save ${{ steps.get_tag.outputs.TAG }} -o /tmp/docker-image.tar
+          
+      - name: Upload Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/docker-image.tar
+          retention-days: 1
+
+  #################################################################
+  # Job 2: Run Unit Tests
+  #################################################################
+  unit_tests:
+    name: Unit Tests
+    needs: build_docker_image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Docker image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - name: Load Docker image
+        run: docker load -i /tmp/docker-image.tar
+
+      - name: Run unit tests inside the container
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspaces/project \
+            -w /workspaces/project \
+            ${{ needs.build_docker_image.outputs.image_tag }} \
+            bash -c "
+              # Change directory to the crate's subfolder
+              cd ${{ env.CRATE_PATH }}
+                            
+              # Run unit tests (tests in src/)
+              echo '--- Running unit tests ---'
+              RUSTC_WRAPPER=sccache cargo test --lib
+            "
+
+  #################################################################
+  # Job 3: Run Integration Tests
+  #################################################################
+  integration_tests:
+    name: Integration Tests
+    needs: build_docker_image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Docker image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - name: Load Docker image
+        run: docker load -i /tmp/docker-image.tar
+
+      - name: Run integration tests inside the container
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspaces/project \
+            -w /workspaces/project \
+            ${{ needs.build_docker_image.outputs.image_tag }} \
+            bash -c "
+              # Change directory to the crate's subfolder
+              cd ${{ env.CRATE_PATH }}
+              
+              # Run integration tests (tests in the 'tests' directory)
+              echo '--- Running integration tests ---'
+              RUSTC_WRAPPER=sccache cargo test --all-features --test '*'
+            "
