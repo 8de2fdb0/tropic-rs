@@ -56,7 +56,7 @@ pub enum BankId {
 
 pub enum BlocIndex {
     DataChunk(DataChunk),
-    CeryStore(u8),
+    CertStore(u8),
     BankId(BankId),
 }
 
@@ -64,7 +64,7 @@ impl From<BlocIndex> for u8 {
     fn from(value: BlocIndex) -> Self {
         match value {
             BlocIndex::DataChunk(data_chunk) => data_chunk as u8,
-            BlocIndex::CeryStore(idx) => idx,
+            BlocIndex::CertStore(idx) => idx,
             BlocIndex::BankId(bank_id) => bank_id as u8,
         }
     }
@@ -120,9 +120,66 @@ impl<const N: usize> From<Response<N>> for GetInfoResp<N> {
 pub const GET_INFO_CHIP_INFO_ID_SIZE: usize = GET_INFO_BLOCK_LEN;
 pub const GET_INFO_RISCV_FW_SIZE: usize = 4;
 pub const GET_INFO_SPECT_FW_SIZE: usize = 4;
-pub const GET_INFO_FW_HEADER_SIZE: usize = 20;
+// pub const GET_INFO_FW_LEN: usize = 4;
+// pub const GET_INFO_FW_HEADER_SIZE: usize = 20;
 
-pub struct SerialNumber {
+/// Provisioning info (128 bits), filled by the provisioning station.
+/// - 8 bits: Provisioning info version.
+/// - 12 bits: Fabrication ID.
+/// - 12 bits: Part Number ID.
+#[derive(Debug, PartialEq)]
+pub struct SerialNumberV1 {
+    pub prov_ver_fab_id_pn: [u8; 4],
+    /// Provisioning date (16 bits).
+    pub provisioning_date: [u8; 2],
+    /// HSM version (32 bits).
+    /// Byte 0: RFU, Byte 1: Major version, Byte 2: Minor version, Byte 3: Patch version
+    pub hsm_ver: [u8; 4],
+    /// Program version (32 bits).
+    pub prog_ver: [u8; 4],
+    /// Reserved field 2 (16 bits).
+    pub rfu_2: [u8; 2],
+}
+
+impl From<[u8; 16]> for SerialNumberV1 {
+    fn from(data: [u8; 16]) -> Self {
+        Self {
+            prov_ver_fab_id_pn: [data[0], data[1], data[2], data[3]],
+            provisioning_date: [data[4], data[5]],
+            hsm_ver: [data[6], data[7], data[8], data[9]],
+            prog_ver: [data[10], data[11], data[12], data[13]],
+            rfu_2: [data[14], data[15]],
+        }
+    }
+}
+
+#[cfg(feature = "display")]
+impl core::fmt::Display for SerialNumberV1 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!(
+            "prov_ver_fab_id_pn: {}.{}.{}.{}, provisioning_date: {}.{}, hsm_ver: {}.{}.{}.{}, prog_ver: {}.{}.{}.{}, rfu_2: {}.{}",
+            self.prov_ver_fab_id_pn[0],
+            self.prov_ver_fab_id_pn[1],
+            self.prov_ver_fab_id_pn[2],
+            self.prov_ver_fab_id_pn[3],
+            self.provisioning_date[0],
+            self.provisioning_date[1],
+            self.hsm_ver[0],
+            self.hsm_ver[1],
+            self.hsm_ver[2],
+            self.hsm_ver[3],
+            self.prog_ver[0],
+            self.prog_ver[1],
+            self.prog_ver[2],
+            self.prog_ver[3],
+            self.rfu_2[0],
+            self.rfu_2[1]
+        ))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SerialNumberV2 {
     /// 8 bits for serial number
     pub sn: u8,
     /// 12 bits fab ID, 12 bits part number ID
@@ -140,7 +197,7 @@ pub struct SerialNumber {
 }
 
 #[cfg(feature = "display")]
-impl core::fmt::Display for SerialNumber {
+impl core::fmt::Display for SerialNumberV2 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
             "sn: {}, fab_date: {}, lot_id: {:?}, wafer_id: {}, x_coord: {}, y_coord: {}",
@@ -149,7 +206,7 @@ impl core::fmt::Display for SerialNumber {
     }
 }
 
-impl From<[u8; 16]> for SerialNumber {
+impl From<[u8; 16]> for SerialNumberV2 {
     fn from(data: [u8; 16]) -> Self {
         Self {
             sn: data[0],
@@ -163,7 +220,63 @@ impl From<[u8; 16]> for SerialNumber {
     }
 }
 
-pub struct Provisioning {
+/// Manufacturing level test info (128 bits), structure retrieved from test line and BP.
+///
+/// The exact copy of ﬁrst two words of MAN_FUNC_TEST structure.
+/// In case of missing, it is filled with 0x00
+#[derive(Debug, PartialEq)]
+pub struct ManufacturingInfo {
+    /// Manufacturing level test info (128 bits), structure retrieved from test line and BP.
+    pub func_test_info: [u8; 8],
+    /// Silicon revision (32 bits).
+    pub silicon_rev: [u8; 4],
+    /// Package Type ID deﬁned by Tropic Square
+    pub packg_type_id: [u8; 2],
+    /// Reserved field 1 (16 bits).
+    pub rfu_1: [u8; 2],
+}
+
+#[cfg(feature = "display")]
+impl core::fmt::Display for ManufacturingInfo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!(
+            "func_test_info: {}.{}.{}.{}.{}.{}.{}.{}, silicon_rev: {}.{}.{}.{}, packg_type_id: {}.{}, rfu_1: {}.{}",
+            self.func_test_info[0],
+            self.func_test_info[1],
+            self.func_test_info[2],
+            self.func_test_info[3],
+            self.func_test_info[4],
+            self.func_test_info[5],
+            self.func_test_info[6],
+            self.func_test_info[7],
+            self.silicon_rev[0],
+            self.silicon_rev[1],
+            self.silicon_rev[2],
+            self.silicon_rev[3],
+            self.packg_type_id[0],
+            self.packg_type_id[1],
+            self.rfu_1[0],
+            self.rfu_1[1]
+        ))
+    }
+}
+
+impl From<[u8; 16]> for ManufacturingInfo {
+    fn from(data: [u8; 16]) -> Self {
+        Self {
+            func_test_info: [
+                data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+            ],
+            silicon_rev: [data[8], data[9], data[10], data[11]],
+            packg_type_id: [data[12], data[13]],
+            rfu_1: [data[14], data[15]],
+        }
+    }
+}
+
+/// Provisioning Data version (160 bits), defined by Tropic Square for each batch in BP.
+#[derive(Debug, PartialEq)]
+pub struct ProvisioningData {
     /// Provisioning template version.
     pub prov_templ_ver: [u8; 2],
     /// Provisioning template tag.
@@ -172,28 +285,46 @@ pub struct Provisioning {
     pub prov_spec_ver: [u8; 2],
     /// Provisioning specification tag.
     pub prov_spec_tag: [u8; 4],
+    /// Batch ID (40 bits).
+    pub batch_id: [u8; 5],
+    /// Reserved field 3 (24 bits).
+    pub rfu_3: [u8; 3],
 }
 
 #[cfg(feature = "display")]
-impl core::fmt::Display for Provisioning {
+impl core::fmt::Display for ProvisioningData {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "prov_templ_ver: {}.{}, prov_spec_ver: {}.{}",
+            "prov_templ_ver: {}.{}, prov_templ_tag: {}.{}, prov_spec_ver: {}.{}, prov_spec_tag: {}.{}, batch_id:  {}.{}.{}.{}.{}, rfu_3: {}.{}.{}",
             self.prov_templ_ver[0],
             self.prov_templ_ver[1],
+            self.prov_templ_tag[0],
+            self.prov_templ_tag[1],
             self.prov_spec_ver[0],
-            self.prov_spec_ver[1]
+            self.prov_spec_ver[1],
+            self.prov_spec_tag[0],
+            self.prov_spec_tag[1],
+            self.batch_id[0],
+            self.batch_id[1],
+            self.batch_id[2],
+            self.batch_id[3],
+            self.batch_id[4],
+            self.rfu_3[0],
+            self.rfu_3[1],
+            self.rfu_3[2]
         ))
     }
 }
 
-impl From<[u8; 16]> for Provisioning {
-    fn from(data: [u8; 16]) -> Self {
+impl From<[u8; 20]> for ProvisioningData {
+    fn from(data: [u8; 20]) -> Self {
         Self {
             prov_templ_ver: [data[0], data[1]],
             prov_templ_tag: [data[2], data[3], data[4], data[5]],
             prov_spec_ver: [data[6], data[7]],
             prov_spec_tag: [data[8], data[9], data[10], data[11]],
+            batch_id: [data[12], data[13], data[14], data[15], data[16]],
+            rfu_3: [data[17], data[18], data[19]],
         }
     }
 }
@@ -203,39 +334,17 @@ pub struct ChipId {
     pub chip_id_ver: [u8; 4], //  [0x01_u8, 0x02, 0x03, 0x04];
     /// Factory level test info (128 bits), structure retrieved from silicon provider.
     pub fl_chip_info: [u8; 16],
-    /// Manufacturing level test info (128 bits), structure retrieved from test line and BP.
-    pub func_test_info: [u8; 8],
-    /// Silicon revision (32 bits).
-    pub silicon_rev: [u8; 4],
-    /// Package Type ID deﬁned by Tropic Square
-    pub packg_type_id: [u8; 2],
-    /// Reserved field 1 (16 bits).
-    pub rfu_1: [u8; 2],
+    /// Manufacturing level test info (128 bits),
+    pub manu_info: ManufacturingInfo,
     /// Provisioning info (128 bits), filled by the provisioning station.
-    /// - 8 bits: Provisioning info version.
-    /// - 12 bits: Fabrication ID.
-    /// - 12 bits: Part Number ID.
-    pub prov_ver_fab_id_pn: [u8; 4],
-    /// Provisioning date (16 bits).
-    pub provisioning_date: [u8; 2],
-    /// HSM version (32 bits).
-    /// Byte 0: RFU, Byte 1: Major version, Byte 2: Minor version, Byte 3: Patch version
-    pub hsm_ver: [u8; 4],
-    /// Program version (32 bits).
-    pub prog_ver: [u8; 4],
-    /// Reserved field 2 (16 bits).
-    pub rfu_2: [u8; 2],
+    pub prov_info: SerialNumberV1,
     /// Serial Number (128 bits).
-    pub ser_num: SerialNumber,
-    ///  Part Number (128 bits), defined by Tropic Square in BP.
-    pub part_num_data: [u8; 16],
+    pub prov_info_v2: SerialNumberV2,
+    /// Part Number (128 bits), defined by Tropic Square in BP.
+    pub part_number: [u8; 16],
     /// Provisioning Data version (96 bits).
     /// Defined by Tropic Square for each batch in BP.
-    pub prov: Provisioning,
-    /// Batch ID (40 bits).
-    pub batch_id: [u8; 5],
-    /// Reserved field 3 (24 bits).
-    pub rfu_3: [u8; 3],
+    pub prov_data: ProvisioningData,
     /// Padding (192 bits).
     pub rfu_4: [u8; 24],
 }
@@ -248,50 +357,11 @@ impl core::fmt::Display for ChipId {
             self.chip_id_ver[0], self.chip_id_ver[1], self.chip_id_ver[2], self.chip_id_ver[3]
         ))?;
         f.write_fmt(format_args!("fl_chip_info: {:?}\r\n", self.fl_chip_info))?;
-        f.write_fmt(format_args!(
-            "func_test_info: {:?}\r\n",
-            self.func_test_info
-        ))?;
-        f.write_fmt(format_args!(
-            "silicon_rev: {}.{}.{}.{}\r\n",
-            self.silicon_rev[0], self.silicon_rev[1], self.silicon_rev[2], self.silicon_rev[3]
-        ))?;
-        f.write_fmt(format_args!(
-            "packg_type_id: {}.{}\r\n",
-            self.packg_type_id[0], self.packg_type_id[1]
-        ))?;
-        f.write_fmt(format_args!(
-            "rfu_1: {}.{}\r\n",
-            self.rfu_1[0], self.rfu_1[1]
-        ))?;
-        f.write_fmt(format_args!(
-            "prov_ver_fab_id_pn: {}.{}.{}.{}\r\n",
-            self.prov_ver_fab_id_pn[0],
-            self.prov_ver_fab_id_pn[1],
-            self.prov_ver_fab_id_pn[2],
-            self.prov_ver_fab_id_pn[3]
-        ))?;
-        f.write_fmt(format_args!(
-            "provisioning_date: {}.{}\r\n",
-            self.provisioning_date[0], self.provisioning_date[1]
-        ))?;
-        f.write_fmt(format_args!(
-            "hsm_ver: {}.{}.{}.{}\r\n",
-            self.hsm_ver[0], self.hsm_ver[1], self.hsm_ver[2], self.hsm_ver[3]
-        ))?;
-        f.write_fmt(format_args!(
-            "prog_ver: {}.{}.{}.{}\r\n",
-            self.prog_ver[0], self.prog_ver[1], self.prog_ver[2], self.prog_ver[3]
-        ))?;
-        f.write_fmt(format_args!(
-            "rfu_2: {}.{}\r\n",
-            self.rfu_2[0], self.rfu_2[1]
-        ))?;
-        f.write_fmt(format_args!("ser_num: {}\r\n", self.ser_num))?;
-        f.write_fmt(format_args!("part_num_data: {:?}\r\n", self.part_num_data))?;
-        f.write_fmt(format_args!("prov: {}\r\n", self.prov))?;
-        f.write_fmt(format_args!("batch_id: {:?}\r\n", self.batch_id))?;
-        f.write_fmt(format_args!("rfu_3: {:?}\r\n", self.rfu_3))?;
+        f.write_fmt(format_args!("manu_info: {}\r\n", self.manu_info))?;
+        f.write_fmt(format_args!("prov_info: {}\r\n", self.prov_info,))?;
+        f.write_fmt(format_args!("ser_num: {}\r\n", self.prov_info_v2))?;
+        f.write_fmt(format_args!("part_num_data: {:?}\r\n", self.part_number))?;
+        f.write_fmt(format_args!("prov_data: {}\r\n", self.prov_data))?;
         f.write_fmt(format_args!("rfu_4: {:?}\r\n", self.rfu_4))
     }
 }
@@ -304,31 +374,24 @@ impl From<[u8; 128]> for ChipId {
                 data[4], data[5], data[6], data[7], data[8], data[9], data[10], data[11], data[12],
                 data[13], data[14], data[15], data[16], data[17], data[18], data[19],
             ],
-            func_test_info: [
-                data[20], data[21], data[22], data[23], data[24], data[25], data[26], data[27],
-            ],
-            silicon_rev: [data[28], data[29], data[30], data[31]],
-            packg_type_id: [data[32], data[33]],
-            rfu_1: [data[34], data[35]],
-            prov_ver_fab_id_pn: [data[36], data[37], data[38], data[39]],
-            provisioning_date: [data[40], data[41]],
-            hsm_ver: [data[42], data[43], data[44], data[45]],
-            prog_ver: [data[46], data[47], data[48], data[49]],
-            rfu_2: [data[50], data[51]],
-            ser_num: SerialNumber::from([
+            manu_info: ManufacturingInfo::from(
+                TryInto::<[u8; 16]>::try_into(&data[20..36]).unwrap(),
+            ),
+            prov_info: SerialNumberV1::from(TryInto::<[u8; 16]>::try_into(&data[36..52]).unwrap()),
+            prov_info_v2: SerialNumberV2::from([
                 data[52], data[53], data[54], data[55], data[56], data[57], data[58], data[59],
-                data[56], data[57], data[58], data[59], data[60], data[61], data[62], data[63],
+                data[60], data[61], data[62], data[63], data[64], data[65], data[66], data[67],
             ]),
-            part_num_data: [
-                data[64], data[65], data[66], data[67], data[68], data[69], data[70], data[71],
-                data[72], data[73], data[74], data[75], data[76], data[77], data[78], data[79],
+            part_number: [
+                data[68], data[69], data[70], data[71], data[72], data[73], data[74], data[75],
+                data[76], data[77], data[78], data[79], data[80], data[81], data[82], data[83],
             ],
-            prov: Provisioning::from([
-                data[80], data[81], data[82], data[83], data[84], data[85], data[86], data[87],
-                data[88], data[89], data[90], data[91], data[92], data[93], data[94], data[95],
+
+            prov_data: ProvisioningData::from([
+                data[84], data[85], data[86], data[87], data[88], data[89], data[90], data[91],
+                data[92], data[93], data[94], data[95], data[96], data[97], data[98], data[99],
+                data[100], data[101], data[102], data[103],
             ]),
-            batch_id: [data[96], data[97], data[98], data[99], data[100]],
-            rfu_3: [data[101], data[102], data[103]],
             rfu_4: [
                 data[104], data[105], data[106], data[107], data[108], data[109], data[110],
                 data[111], data[112], data[113], data[114], data[115], data[116], data[117],
@@ -342,5 +405,130 @@ impl From<[u8; 128]> for ChipId {
 impl From<Response<{ GET_INFO_CHIP_INFO_ID_SIZE }>> for ChipId {
     fn from(resp: Response<{ GET_INFO_CHIP_INFO_ID_SIZE }>) -> Self {
         Self::from(resp.data)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum FirmwareType {
+    Riscv,
+    Spect,
+}
+
+impl From<FirmwareType> for GetInfoObjectId {
+    fn from(r#type: FirmwareType) -> Self {
+        match r#type {
+            FirmwareType::Riscv => GetInfoObjectId::RiscvFwVersion,
+            FirmwareType::Spect => GetInfoObjectId::SpectFwVersion,
+        }
+    }
+}
+
+pub struct FirmwareVersion {
+    pub r#type: FirmwareType,
+    pub version: [u8; 4],
+}
+
+#[cfg(feature = "display")]
+impl core::fmt::Display for FirmwareVersion {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!(
+            "fw_version: {}.{}.{}.{}",
+            match self.r#type {
+                FirmwareType::Riscv => self.version[3] & 0x7f,
+                FirmwareType::Spect => self.version[3],
+            },
+            self.version[2],
+            self.version[1],
+            self.version[0]
+        ))
+    }
+}
+
+/// Maximal size of returned fw header
+const GET_INFO_FW_HEADER_SIZE_BOOT_V1: usize = 20;
+const GET_INFO_FW_HEADER_SIZE_BOOT_V2: usize = 52;
+const GET_INFO_FW_HEADER_SIZE_BOOT_V2_EMPTY_BANK: usize = 0;
+
+/// Maximal size of returned fw header
+pub const GET_INFO_FW_HEADER_SIZE: usize = GET_INFO_FW_HEADER_SIZE_BOOT_V2;
+
+/// When in MAINTENANCE mode, it is possible to read firmware header from a firmware bank. Returned data differs
+/// based on bootloader version. This header layout is returned by bootloader version v1.0.1
+#[derive(Debug, PartialEq)]
+pub struct FirmwareBootHeaderV1 {
+    r#type: [u8; 4],
+    version: [u8; 4],
+    size: [u8; 4],
+    git_hash: [u8; 4],
+    hash: [u8; 4],
+}
+
+/// When in MAINTENANCE mode, it is possible to read firmware header from a firmware bank.
+/// Returned data differs based on bootloader version.
+/// This header layout is returned by bootloader version v1.0.1
+#[derive(Debug, PartialEq)]
+pub struct FirmwareBootHeaderV2 {
+    /// Currently only two types supported:
+    /// - 1: FW for RISCV coprocessor
+    /// - 2: FW for SPECT coprocessor
+    r#type: u16,
+    padding: u8,
+    /// This header version.
+    header_version: u8,
+    /// FW version, the same number as [`FirmwareVersion`] or
+    /// TS_L2_GET_INFO_REQ_OBJECT_ID_SPECT_ROM_ID*.
+    version: u32,
+    /// FW size in bytes (always aligned to uint32_t).
+    size: u32,
+    /// @brief GIT hash of the underlying FW repository.
+    git_hash: u32,
+    /// @brief Hash for data integrity (SHA256, 32B).
+    hash: [u8; 32],
+    /// Other FW version compatibility. In case RISCV FW
+    /// there may be SPECT version to match. Zero means any version.
+    pair_version: u32,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum FirmwareBootHeader {
+    Empty,
+    V1(FirmwareBootHeaderV1),
+    V2(FirmwareBootHeaderV2),
+}
+
+impl TryFrom<Response<GET_INFO_FW_HEADER_SIZE>> for FirmwareBootHeader {
+    type Error = Error;
+    fn try_from(resp: super::Response<GET_INFO_FW_HEADER_SIZE>) -> Result<Self, Self::Error> {
+        let data = resp.data;
+        if resp.chip_status.chip_mode() != l1::ChipMode::Startup {
+            return Err(Error::ChipMode(l1::ChipMode::Startup));
+        }
+
+        match resp.len as usize {
+            GET_INFO_FW_HEADER_SIZE_BOOT_V1 => Ok(Self::V1(FirmwareBootHeaderV1 {
+                r#type: [data[0], data[1], data[2], data[3]],
+                version: [data[4], data[5], data[6], data[7]],
+                size: [data[8], data[9], data[10], data[11]],
+                git_hash: [data[12], data[13], data[14], data[15]],
+                hash: [data[16], data[17], data[18], data[19]],
+            })),
+            GET_INFO_FW_HEADER_SIZE_BOOT_V2 => Ok(Self::V2(FirmwareBootHeaderV2 {
+                r#type: u16::from_le_bytes([data[0], data[1]]),
+                padding: data[2],
+                header_version: data[3],
+                version: u32::from_le_bytes([data[4], data[5], data[6], data[7]]),
+                size: u32::from_le_bytes([data[8], data[9], data[10], data[11]]),
+                git_hash: u32::from_le_bytes([data[12], data[13], data[14], data[15]]),
+                hash: [
+                    data[16], data[17], data[18], data[19], data[20], data[21], data[22], data[23],
+                    data[24], data[25], data[26], data[27], data[28], data[29], data[30], data[31],
+                    data[32], data[33], data[34], data[35], data[36], data[37], data[38], data[39],
+                    data[40], data[41], data[42], data[43], data[44], data[45], data[46], data[47],
+                ],
+                pair_version: u32::from_le_bytes([data[48], data[49], data[50], data[51]]),
+            })),
+            GET_INFO_FW_HEADER_SIZE_BOOT_V2_EMPTY_BANK => Ok(Self::Empty),
+            _ => Err(Error::UnknwonFirmwareHeaderSize),
+        }
     }
 }

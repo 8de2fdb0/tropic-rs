@@ -113,41 +113,39 @@ where
         Ok(resp.into())
     }
 
-    pub fn get_riscv_firmware_version(&mut self) -> Result<[u8; 4], Error> {
+    pub fn get_firmware_version(
+        &mut self,
+        r#type: l2::info::FirmwareType,
+    ) -> Result<l2::info::FirmwareVersion, Error> {
         let req = l2::info::GetInfoReq::create(
-            l2::info::GetInfoObjectId::RiscvFwVersion,
+            r#type.clone().into(),
             l2::info::BlocIndex::DataChunk(l2::info::DataChunk::Bytes0_127),
         )?;
         self.spi_device.write(&req)?;
+
         let resp: l2::Response<{ l2::info::GET_INFO_RISCV_FW_SIZE }> =
             l1::receive(&mut self.spi_device, &mut self.delay)?.try_into()?;
-        Ok(resp.data)
+
+        Ok(l2::info::FirmwareVersion {
+            r#type,
+            version: resp.data,
+        })
     }
 
-    pub fn get_spect_firmware_version(&mut self) -> Result<[u8; 4], Error> {
-        let req = l2::info::GetInfoReq::create(
-            l2::info::GetInfoObjectId::SpectFwVersion,
-            l2::info::BlocIndex::DataChunk(l2::info::DataChunk::Bytes0_127),
-        )?;
-        self.spi_device.write(&req)?;
-        let resp = l1::receive::<SPI, D, { l2::info::GET_INFO_SPECT_FW_SIZE }>(
-            &mut self.spi_device,
-            &mut self.delay,
-        )?;
-        Ok(resp.data)
-    }
-
-    pub fn get_info_fw_bank(&mut self, bank_id: l2::info::BankId) -> Result<[u8; 20], Error> {
+    pub fn get_firmware_boot_header(
+        &mut self,
+        bank_id: l2::info::BankId,
+    ) -> Result<l2::info::FirmwareBootHeader, Error> {
         let req = l2::info::GetInfoReq::create(
             l2::info::GetInfoObjectId::FwBank,
             l2::info::BlocIndex::BankId(bank_id),
         )?;
         self.spi_device.write(&req)?;
-        let resp = l1::receive::<SPI, D, { l2::info::GET_INFO_FW_HEADER_SIZE }>(
-            &mut self.spi_device,
-            &mut self.delay,
-        )?;
-        Ok(resp.data)
+
+        let resp: l2::Response<{ l2::info::GET_INFO_FW_HEADER_SIZE }> =
+            l1::receive(&mut self.spi_device, &mut self.delay)?.try_into()?;
+
+        Ok(resp.try_into()?)
     }
 
     pub fn get_riscv_firmware_log(&mut self) -> Result<l2::log::GetLogResp, Error> {
@@ -219,6 +217,16 @@ where
         Ok(session)
     }
 
+    pub fn abort_session(&mut self) -> Result<l2::Status, Error> {
+        let req = l2::enc_session::SessionAbortReq::create()?;
+        self.spi_device.write(&req)?;
+
+        let resp: l2::Response<{ l2::enc_session::ENCRYPTED_SESSION_ABT_RSP_LEN }> =
+            l1::receive(&mut self.spi_device, &mut self.delay)?.try_into()?;
+
+        Ok(resp.status)
+    }
+
     pub fn ping(
         &mut self,
         session: &mut EncSession,
@@ -281,7 +289,7 @@ where
         Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
     }
 
-    pub fn config_read<R: RegisterAddr>(
+    pub fn r_config_read_value<R: RegisterAddr>(
         &mut self,
         session: &mut EncSession,
         addr: R,
@@ -294,6 +302,75 @@ where
         )?;
 
         Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.try_into()?)
+    }
+    pub fn r_config_write_value<R: RegisterAddr>(
+        &mut self,
+        session: &mut EncSession,
+        addr: R,
+        value: R::Item,
+    ) -> Result<l3::reversable_config::ConfigWriteResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::reversable_config::ConfigWriteCmd::create(addr, value),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.try_into()?)
+    }
+
+    pub fn r_config_read(
+        &mut self,
+        session: &mut EncSession,
+    ) -> Result<common::config::Config, Error> {
+        let whole_r_config = common::config::read_whole_i_or_r_config(
+            &mut self.spi_device,
+            &mut self.delay,
+            session,
+            common::config::ConfigType::Reversable,
+        )?;
+        Ok(whole_r_config)
+    }
+
+    pub fn r_config_erase(
+        &mut self,
+        session: &mut EncSession,
+    ) -> Result<l3::reversable_config::ConfigEraseResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::reversable_config::ConfigEraseCmd::create(),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.try_into()?)
+    }
+
+    pub fn r_config_write(
+        &mut self,
+        session: &mut EncSession,
+        config: &common::config::Config,
+    ) -> Result<l3::reversable_config::ConfigWriteResp, Error> {
+        let resp: l3::reversable_config::ConfigWriteResp = common::config::write_whole_r_config(
+            &mut self.spi_device,
+            &mut self.delay,
+            session,
+            config,
+        )?;
+        Ok(resp)
+    }
+
+    pub fn i_config_read(
+        &mut self,
+        session: &mut EncSession,
+    ) -> Result<common::config::Config, Error> {
+        let whole_r_config = common::config::read_whole_i_or_r_config(
+            &mut self.spi_device,
+            &mut self.delay,
+            session,
+            common::config::ConfigType::Irreverasable,
+        )?;
+        Ok(whole_r_config)
     }
 }
 
@@ -355,52 +432,64 @@ mod tests {
         let fl_chip_info = [0x0_u8; 16];
         resp.extend_from_slice(&fl_chip_info);
 
-        let func_test_info = [0x01_u8; 8];
-        resp.extend_from_slice(&func_test_info);
+        let manu_info = l2::info::ManufacturingInfo {
+            func_test_info: [0x01_u8; 8],
+            silicon_rev: [0xb_u8, 0xe, 0xe, 0xf],
+            packg_type_id: [0x0_u8; 2],
+            rfu_1: [0x1_u8; 2],
+        };
+        resp.extend_from_slice(&manu_info.func_test_info);
+        resp.extend_from_slice(&manu_info.silicon_rev);
+        resp.extend_from_slice(&manu_info.packg_type_id);
+        resp.extend_from_slice(&manu_info.rfu_1);
 
-        let silicon_rev = [0xb_u8, 0xe, 0xe, 0xf];
-        resp.extend_from_slice(&silicon_rev);
+        let ser_num_v1 = l2::info::SerialNumberV1 {
+            prov_ver_fab_id_pn: [0x0_u8; 4],
+            provisioning_date: [0x0_u8; 2],
+            hsm_ver: [0x0_u8; 4],
+            prog_ver: [0x0_u8; 4],
+            rfu_2: [0x0_u8; 2],
+        };
+        resp.extend_from_slice(&ser_num_v1.prov_ver_fab_id_pn);
+        resp.extend_from_slice(&ser_num_v1.provisioning_date);
+        resp.extend_from_slice(&ser_num_v1.hsm_ver);
+        resp.extend_from_slice(&ser_num_v1.prog_ver);
+        resp.extend_from_slice(&ser_num_v1.rfu_2);
 
-        let packg_type_id = [0x0_u8; 2];
-        resp.extend_from_slice(&packg_type_id);
-
-        let rfu_1 = [0x1_u8; 2];
-        resp.extend_from_slice(&rfu_1);
-
-        let prov_ver_fab_id_pn = [0x0_u8; 4];
-        resp.extend_from_slice(&prov_ver_fab_id_pn);
-
-        let provisioning_date = [0x0_u8; 2];
-        resp.extend_from_slice(&provisioning_date);
-
-        let hsm_ver = [0x0_u8; 4];
-        resp.extend_from_slice(&hsm_ver);
-
-        let prog_ver = [0x0_u8; 4];
-        resp.extend_from_slice(&prog_ver);
-
-        let rfu_2 = [0x0_u8; 2];
-        resp.extend_from_slice(&rfu_2);
-
-        let ser_num = [0x0_u8; 16];
-        resp.extend_from_slice(&ser_num);
+        let ser_num_v2 = l2::info::SerialNumberV2 {
+            sn: 0x1,
+            fab_data: [0x0_u8; 3],
+            fab_date: 10,
+            lot_id: [0x0_u8; 5],
+            wafer_id: 0x2,
+            x_coord: 100,
+            y_coord: 200,
+        };
+        resp.extend_from_slice(&ser_num_v2.sn.to_le_bytes());
+        resp.extend_from_slice(&ser_num_v2.fab_data);
+        resp.extend_from_slice(&ser_num_v2.fab_date.to_le_bytes());
+        resp.extend_from_slice(&ser_num_v2.lot_id);
+        resp.extend_from_slice(&ser_num_v2.wafer_id.to_le_bytes());
+        resp.extend_from_slice(&ser_num_v2.x_coord.to_le_bytes());
+        resp.extend_from_slice(&ser_num_v2.y_coord.to_le_bytes());
 
         let part_num_data = [0x0_u8; 16];
         resp.extend_from_slice(&part_num_data);
 
-        let prov_templ_ver = [0x0_u8; 2];
-        resp.extend_from_slice(&prov_templ_ver);
-        let prov_templ_tag = [0x0_u8; 4];
-        resp.extend_from_slice(&prov_templ_tag);
-        let prov_spec_ver = [0x0_u8; 2];
-        resp.extend_from_slice(&prov_spec_ver);
-        let prov_spec_tag = [0x0_u8; 4];
-        resp.extend_from_slice(&prov_spec_tag);
-
-        let batch_id = [0x0_u8; 5];
-        resp.extend_from_slice(&batch_id);
-        let rfu_3 = [0x0_u8; 3];
-        resp.extend_from_slice(&rfu_3);
+        let prov_data = l2::info::ProvisioningData {
+            prov_templ_ver: [0x0_u8; 2],
+            prov_templ_tag: [0x0_u8; 4],
+            prov_spec_ver: [0x0_u8; 2],
+            prov_spec_tag: [0x0_u8; 4],
+            batch_id: [0x0_u8; 5],
+            rfu_3: [0x0_u8; 3],
+        };
+        resp.extend_from_slice(&prov_data.prov_templ_ver);
+        resp.extend_from_slice(&prov_data.prov_templ_tag);
+        resp.extend_from_slice(&prov_data.prov_spec_ver);
+        resp.extend_from_slice(&prov_data.prov_spec_tag);
+        resp.extend_from_slice(&prov_data.batch_id);
+        resp.extend_from_slice(&prov_data.rfu_3);
 
         let rfu_4 = [0x0_u8; 24];
         resp.extend_from_slice(&rfu_4);
@@ -432,23 +521,11 @@ mod tests {
 
         assert_eq!(chip_info.chip_id_ver, chip_id_ver);
         assert_eq!(chip_info.fl_chip_info, fl_chip_info);
-        assert_eq!(chip_info.func_test_info, func_test_info);
-        assert_eq!(chip_info.silicon_rev, silicon_rev);
-        assert_eq!(chip_info.packg_type_id, packg_type_id);
-        assert_eq!(chip_info.rfu_1, rfu_1);
-        assert_eq!(chip_info.prov_ver_fab_id_pn, prov_ver_fab_id_pn);
-        assert_eq!(chip_info.provisioning_date, provisioning_date);
-        assert_eq!(chip_info.hsm_ver, hsm_ver);
-        assert_eq!(chip_info.prog_ver, prog_ver);
-        assert_eq!(chip_info.rfu_2, rfu_2);
-        // assert_eq!(chip_info.ser_num, ser_num);
-        assert_eq!(chip_info.part_num_data, part_num_data);
-        assert_eq!(chip_info.prov.prov_templ_ver, prov_templ_ver);
-        assert_eq!(chip_info.prov.prov_templ_tag, prov_templ_tag);
-        assert_eq!(chip_info.prov.prov_spec_ver, prov_spec_ver);
-        assert_eq!(chip_info.prov.prov_spec_tag, prov_spec_tag);
-        assert_eq!(chip_info.batch_id, batch_id);
-        assert_eq!(chip_info.rfu_3, rfu_3);
+        assert_eq!(chip_info.manu_info, manu_info);
+        assert_eq!(chip_info.prov_info, ser_num_v1);
+        assert_eq!(chip_info.prov_info_v2, ser_num_v2);
+        assert_eq!(chip_info.part_number, part_num_data);
+        assert_eq!(chip_info.prov_data, prov_data);
         assert_eq!(chip_info.rfu_4, rfu_4);
 
         mocked_delay.done();

@@ -9,9 +9,11 @@
 use x25519_dalek::StaticSecret;
 
 pub enum SamplePairingKey {
+    /// Key used by model server defined in 2025-06-27T07-51-29Z__prod_C2S_T200__provisioning__lab_batch_package/tropic01_lab_batch_package.yml.
+    TvlModelSlot0,
     /// Key for engenering sampla01 slot 0
     Sample0,
-    /// Key with acces to write attestation key in slot 1
+    /// Key with access to write attestation key in slot 1
     AttestSlot,
     /// Key with access only to read serial number
     ReadSerial,
@@ -22,6 +24,7 @@ pub enum SamplePairingKey {
 impl SamplePairingKey {
     pub fn to_x25519_secret(&self) -> StaticSecret {
         match self {
+            SamplePairingKey::TvlModelSlot0 => PRIVATE_KEY_TVL_MODEL_SLOT0.into(),
             SamplePairingKey::Sample0 => PRIVKEY_ENGINEERING_SAMPLE01.into(),
             SamplePairingKey::AttestSlot => SAMPLE_S_HOST_PRIVKEY_ATTEST_SLOT.into(),
             SamplePairingKey::ReadSerial => SAMPLE_S_HOST_PRIVKEY_READ_SERIAL.into(),
@@ -29,6 +32,11 @@ impl SamplePairingKey {
         }
     }
 }
+
+const PRIVATE_KEY_TVL_MODEL_SLOT0: [u8; 32] = [
+    0x28, 0x3f, 0x5a, 0x0f, 0xfc, 0x41, 0xcf, 0x50, 0x98, 0xa8, 0xe1, 0x7d, 0xb6, 0x37, 0x2c, 0x3c,
+    0xaa, 0xd1, 0xee, 0xee, 0xdf, 0x0f, 0x75, 0xbc, 0x3f, 0xbf, 0xcd, 0x9c, 0xab, 0x3d, 0xe9, 0x72,
+];
 
 const PRIVKEY_ENGINEERING_SAMPLE01: [u8; 32] = [
     0xd0, 0x99, 0x92, 0xb1, 0xf1, 0x7a, 0xbc, 0x4d, 0xb9, 0x37, 0x17, 0x68, 0xa2, 0x7d, 0xa0, 0x5b,

@@ -51,7 +51,7 @@ impl From<aes_gcm::aead::Error> for Error {
 }
 
 pub trait Session {
-    fn encrypt_request(&mut self, data: &mut [u8]) -> Result<[u8; 16], Error>;
+    fn encrypt_request(&mut self, data: &mut [u8]) -> Result<[u8; TAG_LEN], Error>;
 
     fn decrypt_response(&mut self, data: &mut [u8], tag: &[u8; TAG_LEN]) -> Result<(), Error>;
 }
@@ -212,27 +212,27 @@ impl EncSession {
         })
     }
 
-    pub fn encrypt_request(&mut self, data: &mut [u8]) -> Result<[u8; 16], Error> {
-        let mut cipher = Aes256Gcm::new(&self.k_cmd.into());
-        let tag = cipher.encrypt_in_place_detached(&self.nonce_cmd.value.into(), &[], data)?;
-        self.nonce_cmd.increase()?;
-        Ok(tag.into())
-    }
-
     pub fn decrypt_response(&mut self, data: &mut [u8], tag: &[u8; TAG_LEN]) -> Result<(), Error> {
         let mut cipher = Aes256Gcm::new(&self.k_res.into());
         cipher.decrypt_in_place_detached(&self.nonce_res.value.into(), &[], data, tag.into())?;
         self.nonce_res.increase()?;
         Ok(())
     }
+
+    pub fn encrypt_request(&mut self, data: &mut [u8]) -> Result<[u8; 16], Error> {
+        let mut cipher = Aes256Gcm::new(&self.k_cmd.into());
+        let tag = cipher.encrypt_in_place_detached(&self.nonce_cmd.value.into(), &[], data)?;
+        self.nonce_cmd.increase()?;
+        Ok(tag.into())
+    }
 }
 
 impl Session for EncSession {
+    fn encrypt_request(&mut self, data: &mut [u8]) -> Result<[u8; TAG_LEN], Error> {
+        self.encrypt_request(data)
+    }
     fn decrypt_response(&mut self, data: &mut [u8], tag: &[u8; TAG_LEN]) -> Result<(), Error> {
         self.decrypt_response(data, tag)
-    }
-    fn encrypt_request(&mut self, data: &mut [u8]) -> Result<[u8; 16], Error> {
-        self.encrypt_request(data)
     }
 }
 
@@ -247,8 +247,8 @@ pub(crate) mod mock {
 
     impl Session for MockSession {
         fn decrypt_response(&mut self, _data: &mut [u8], tag: &[u8; 16]) -> Result<(), Error> {
-            for i in 0..tag.len() {
-                if tag[i] != self.dec_tag[i] {
+            for (i, tag_item) in tag.iter().enumerate() {
+                if *tag_item != self.dec_tag[i] {
                     return Err(Error::BadDecTag);
                 }
             }

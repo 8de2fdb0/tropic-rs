@@ -12,7 +12,7 @@ rand_core_compat = { version = "0.1", default-features = false, features = [
     "rand_core_0_6",
     "rand_core_0_9",
 ] }
-x25519-dalek = { version = "2", default-features = false, features = [
+x25519-dalek = { version = "2.0", default-features = false, features = [
     "static_secrets",
 ] }
 ed25519-dalek = { version = "2", default-features = false }
@@ -23,14 +23,28 @@ aes-gcm = { version = "0.10", default-features = false, features = ["aes"] }
 
 # generic-array = { version = "0.14", default-features = false }
 bitflag-attr = { version = "0.12", default-features = false }
+bitfields = "1.0"
 
-
-defmt = { version = "1", optional = true }
+defmt = { version = "1.0", optional = true }
 
 [dev-dependencies]
 embedded-hal-mock = { version = "0.11", default-features = false, features = [
     'eh1',
 ] }
+rand = "0.9"
+log = "0.4"
+env_logger = "0.11"
+serde = { "version" = "1", features = ["derive"] }
+serde_yaml = "0.9"
+tempfile = "3.21"
+derive_builder = "0.20"
+tropic-cert-store = { path = "../tropic-cert-store", default-features = false, features = [
+    "nom-decoder",
+] }
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
+wait-timeout = "0.2"
 
 [features]
 default = []

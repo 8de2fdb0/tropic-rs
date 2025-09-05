@@ -37,9 +37,14 @@ pub enum Error {
     PLaintextCmdSize,
     Session(session::Error),
     InvalidStatus(u8),
+    RespErr(Status),
     MaxPingMsgSize,
     MaxFrameSize,
     ReadConfigBytes,
+    RMemDataWrite(Status),
+    Ecc(Status),
+    Mcounter(Status),
+    PairingKey(Status),
 }
 
 #[cfg(feature = "display")]
@@ -49,12 +54,22 @@ impl core::fmt::Display for Error {
             Self::L2(err) => f.write_fmt(format_args!("l2 error: {}", err)),
             Self::PLaintextCmdSize => f.write_str("plaintext command size too big"),
             Self::Session(err) => f.write_fmt(format_args!("session error: {}", err)),
-            Self::InvalidStatus(status) => {
-                f.write_fmt(format_args!("l2: invalid status: {}", status))
-            }
+            Self::InvalidStatus(status) => f.write_fmt(format_args!("invalid status: {}", status)),
+            Self::RespErr(status) => f.write_fmt(format_args!(
+                "response contained error status: {:?}",
+                status
+            )),
             Self::MaxPingMsgSize => f.write_str("ping message size too big"),
             Self::MaxFrameSize => f.write_str("requested frame size too big"),
             Self::ReadConfigBytes => f.write_str("failed to read config bytes"),
+            Self::RMemDataWrite(status) => {
+                f.write_fmt(format_args!("r_mem_data_write error: {:?}", status))
+            }
+            Self::Ecc(status) => f.write_fmt(format_args!("ecc error: {:?}", status)),
+            Self::Mcounter(status) => f.write_fmt(format_args!("mcounter error: {:?}", status)),
+            Self::PairingKey(status) => {
+                f.write_fmt(format_args!("pairing key error: {:?}", status))
+            }
         }
     }
 }
@@ -157,7 +172,7 @@ pub(crate) fn receive<
     }
 
     let mut buf = [0_u8; FRAME_MAX_LEN];
-    l2::enc_cmd::receive(spi_device, delay, &mut buf)?;
+    l2::enc_session::receive(spi_device, delay, &mut buf)?;
 
     // len = 1 byte status + data
     let len = u16::from_le_bytes(buf[..RES_SIZE_LEN].try_into().unwrap());
@@ -171,6 +186,25 @@ pub(crate) fn receive<
 
     session.decrypt_response(&mut data[..len as usize], &tag)?;
     let status = data[0].try_into()?;
+
+    match status {
+        Status::RMemDataWriteSlotExpired | Status::RMemDataWriteWriteFail => {
+            return Err(Error::RMemDataWrite(status));
+        }
+        Status::EccInvalidKey => {
+            return Err(Error::Ecc(status));
+        }
+        Status::McounterUpdateUpdateErr | Status::CounterInvalid => {
+            return Err(Error::Mcounter(status));
+        }
+        Status::PairingKeyEmpty | Status::PairingKeyInvalid => {
+            return Err(Error::PairingKey(status));
+        }
+        Status::Fail | Status::InvalidCmd | Status::Unauthorized => {
+            return Err(Error::RespErr(status));
+        }
+        Status::Ok => {}
+    }
 
     // shift status out of data
     for i in 0..(len as usize - 1) {
@@ -229,7 +263,7 @@ pub fn send<
     session: &mut impl Session,
 ) -> Result<(), Error> {
     let enc_cmd = Request::<N>::create(plaintext_cmd, session)?;
-    let enc_cmd_chunks = l2::enc_cmd::EncryptedCmdReq::create(&enc_cmd)?;
+    let enc_cmd_chunks = l2::enc_session::EncryptedCmdReq::create(&enc_cmd)?;
 
     for i in 0..enc_cmd_chunks.count {
         let is_last_chunk = i == enc_cmd_chunks.count - 1;
@@ -284,7 +318,7 @@ pub mod ping {
     #[allow(unused)]
     const PING_RES_LEN: usize = RES_STATUS_LEN + PING_LEN_MAX;
 
-    pub(crate) const PING_LEN_MAX: usize = CMD_DATA_SIZE_MAX - CMD_ID_LEN;
+    pub const PING_LEN_MAX: usize = CMD_DATA_SIZE_MAX - CMD_ID_LEN;
 
     pub struct PingCmd {
         size: u16,
@@ -375,10 +409,10 @@ pub mod ping {
             )
             .expect("failed to get result");
 
-            let write_result: PingResp = result.try_into().expect("failed to parse result");
+            let write_result: PingResp = result.into();
 
             assert_eq!(write_result.status, Status::Ok);
-            assert_eq!(write_result.len, 5 as u16 - 1);
+            assert_eq!(write_result.len, 5_u16 - 1);
             assert_eq!(write_result.msg(), b"ping");
 
             mocked_delay.done();
@@ -650,8 +684,7 @@ pub mod payring_key {
             )
             .expect("failed to get result");
 
-            let write_result: PairingKeyWriteResp =
-                result.try_into().expect("failed to parse result");
+            let write_result: PairingKeyWriteResp = result.into();
 
             assert_eq!(write_result.status, Status::Ok);
             assert_eq!(write_result.len, PAIRING_KEY_WRITE_RESP_LEN as u16 - 1);
@@ -698,8 +731,7 @@ pub mod payring_key {
             )
             .expect("failed to get result");
 
-            let read_result: PairingKeyReadResp =
-                result.try_into().expect("failed to parse result");
+            let read_result: PairingKeyReadResp = result.into();
 
             assert_eq!(read_result.status, Status::Ok);
             assert_eq!(read_result.len, PAIRING_KEY_READ_RES_LEN as u16 - 1);
@@ -742,8 +774,7 @@ pub mod payring_key {
             )
             .expect("failed to get result");
 
-            let invalidate_result: PairingKeyInvalidateResp =
-                result.try_into().expect("failed to parse result");
+            let invalidate_result: PairingKeyInvalidateResp = result.into();
 
             assert_eq!(invalidate_result.status, Status::Ok);
             assert_eq!(
@@ -759,9 +790,10 @@ pub mod payring_key {
 
 pub mod reversable_config {
 
-    use bitflag_attr::Flags;
-
-    use crate::common::config::RegisterAddr;
+    use crate::common::{
+        self,
+        config::{RegisterAddr, RegisterValue as _},
+    };
 
     use super::*;
 
@@ -781,13 +813,13 @@ pub mod reversable_config {
     impl ConfigWriteCmd {
         pub fn create<R: RegisterAddr>(addr: R, value: R::Item) -> Self {
             let mut data = [0_u8; R_CONFIG_WRITE_CMD_LEN];
-            let addr = addr.to_register_addr();
+            let addr = addr.register_addr();
             data[0] = R_CONFIG_WRITE_CMD_ID;
             data[1] = addr[0];
             data[2] = addr[1];
             // padding
             data[3] = 0x00;
-            data[4..8].copy_from_slice(&value.bits().to_le_bytes());
+            data[4..8].copy_from_slice(&value.to_value());
             let size = (R_CONFIG_WRITE_CMD_LEN) as u16;
             Self { data, size }
         }
@@ -836,7 +868,7 @@ pub mod reversable_config {
     impl ConfigReadCmd {
         pub fn create<R: RegisterAddr>(addr: R) -> Self {
             let mut data = [0_u8; R_CONFIG_READ_CMD_LEN];
-            let addr = addr.to_register_addr();
+            let addr = addr.register_addr();
             data[0] = R_CONFIG_READ_CMD_ID;
             data[1] = addr[0];
             data[2] = addr[1];
@@ -855,7 +887,7 @@ pub mod reversable_config {
         }
     }
 
-    pub struct ConfigReadResp<T: Flags<Bits = u32>> {
+    pub struct ConfigReadResp<T: common::config::RegisterValue> {
         pub len: u16,
         pub status: Status,
         pub padding: [u8; 3],
@@ -865,7 +897,8 @@ pub mod reversable_config {
     #[cfg(feature = "display")]
     impl<T> core::fmt::Display for ConfigReadResp<T>
     where
-        T: Flags<Bits = u32> + core::fmt::Display,
+        // T: Flags<Bits = u32> + core::fmt::Display,
+        T: common::config::RegisterValue + core::fmt::Display,
     {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             f.write_fmt(format_args!(
@@ -875,7 +908,9 @@ pub mod reversable_config {
         }
     }
 
-    impl<T: Flags<Bits = u32>> TryFrom<Response<R_CONFIG_READ_RES_LEN>> for ConfigReadResp<T> {
+    impl<T: common::config::RegisterValue> TryFrom<Response<R_CONFIG_READ_RES_LEN>>
+        for ConfigReadResp<T>
+    {
         type Error = Error;
 
         fn try_from(resp: Response<R_CONFIG_READ_RES_LEN>) -> Result<Self, Self::Error> {
@@ -885,7 +920,7 @@ pub mod reversable_config {
                     .map_err(|_| Error::ReadConfigBytes)?,
             );
 
-            let value = T::from_bits_retain(value);
+            let value = T::from_u32(value);
 
             Ok(Self {
                 len: resp.len,
@@ -912,7 +947,7 @@ pub mod reversable_config {
 
     impl ConfigEraseCmd {
         #[allow(unused)]
-        fn create() -> Self {
+        pub fn create() -> Self {
             let mut data = [0_u8; R_CONFIG_ERASE_CMD_LEN];
             data[0] = R_CONFIG_ERASE_CMD_ID;
             let size = (R_CONFIG_ERASE_CMD_LEN) as u16;
@@ -954,7 +989,7 @@ pub mod reversable_config {
         use embedded_hal_mock::eh1::delay::CheckedDelay;
 
         use super::*;
-        use crate::{common, l3};
+        use crate::{common::config::bootloader, l3};
 
         #[test]
         fn test_config_write() {
@@ -979,13 +1014,13 @@ pub mod reversable_config {
                     &[Status::Ok as u8],
                 );
 
-            let addr = crate::common::config::StartUp;
-            let value = crate::common::config::StartUpConfig::default();
+            let addr = bootloader::StartUpRegAddr;
+            let value = bootloader::StartUp::default();
 
             l3::send(
                 &mut mocked_spi_device,
                 &mut mocked_delay,
-                l3::reversable_config::ConfigWriteCmd::create(addr, value),
+                ConfigWriteCmd::create(addr, value),
                 &mut mocked_session,
             )
             .expect("failed to send command");
@@ -1024,12 +1059,12 @@ pub mod reversable_config {
                     &[Status::Ok as u8, 0, 0, 0, 255, 255, 255, 255],
                 );
 
-            let addr = crate::common::config::StartUp;
+            let addr = bootloader::StartUpRegAddr;
 
             l3::send(
                 &mut mocked_spi_device,
                 &mut mocked_delay,
-                l3::reversable_config::ConfigReadCmd::create(addr),
+                ConfigReadCmd::create(addr),
                 &mut mocked_session,
             )
             .expect("failed to send command");
@@ -1041,7 +1076,7 @@ pub mod reversable_config {
             )
             .expect("failed to get result");
 
-            let read_result: ConfigReadResp<common::config::StartUpConfig> =
+            let read_result: ConfigReadResp<bootloader::StartUp> =
                 result.try_into().expect("failed to parse result");
 
             assert_eq!(read_result.status, Status::Ok);
@@ -1071,7 +1106,7 @@ pub mod reversable_config {
             l3::send(
                 &mut mocked_spi_device,
                 &mut mocked_delay,
-                l3::reversable_config::ConfigEraseCmd::create(),
+                ConfigEraseCmd::create(),
                 &mut mocked_session,
             )
             .expect("failed to send command");
@@ -1087,6 +1122,247 @@ pub mod reversable_config {
 
             assert_eq!(erase_result.status, Status::Ok);
             assert_eq!(erase_result.len, R_CONFIG_ERASE_RES_LEN as u16 - 1);
+
+            mocked_delay.done();
+            mocked_spi_device.done();
+        }
+    }
+}
+
+pub mod irreversable_config {
+
+    use crate::common::{self, config::RegisterAddr};
+
+    use super::*;
+
+    const I_CONFIG_WRITE_CMD_ID: u8 = 0x30;
+    // command length CMD_ID[1] REG_ADDR[2] BIT_INDEX[1]
+    const I_CONFIG_WRITE_CMD_LEN: usize = CMD_ID_LEN + CMD_SIZE_LEN + 1;
+
+    // result length STATUS[1]
+    const I_CONFIG_WRITE_RES_LEN: usize = RES_STATUS_LEN;
+
+    pub struct ConfigWriteCmd {
+        size: u16,
+        data: [u8; I_CONFIG_WRITE_CMD_LEN],
+    }
+
+    impl ConfigWriteCmd {
+        pub fn create<R: RegisterAddr>(addr: R, bit_index: u8) -> Self {
+            let mut data = [0_u8; I_CONFIG_WRITE_CMD_LEN];
+            let addr = addr.register_addr();
+            data[0] = I_CONFIG_WRITE_CMD_ID;
+            data[1] = addr[0];
+            data[2] = addr[1];
+            data[3] = bit_index;
+            let size = (I_CONFIG_WRITE_CMD_LEN) as u16;
+            Self { data, size }
+        }
+    }
+
+    impl PlaintextCmd<{ I_CONFIG_WRITE_CMD_LEN }> for ConfigWriteCmd {
+        fn size(&self) -> u16 {
+            self.size
+        }
+
+        fn data(self) -> [u8; I_CONFIG_WRITE_CMD_LEN] {
+            self.data
+        }
+    }
+
+    pub struct ConfigWriteResp {
+        pub len: u16,
+        pub status: Status,
+    }
+
+    impl TryFrom<Response<I_CONFIG_WRITE_RES_LEN>> for ConfigWriteResp {
+        type Error = Error;
+
+        fn try_from(resp: Response<I_CONFIG_WRITE_RES_LEN>) -> Result<Self, Self::Error> {
+            Ok(Self {
+                len: resp.len,
+                status: resp.status,
+            })
+        }
+    }
+
+    // command id
+    const I_CONFIG_READ_CMD_ID: u8 = 0x31;
+
+    // command length CMD_ID[1] REG_ADDR[2]
+    const I_CONFIG_READ_CMD_LEN: usize = CMD_ID_LEN + CMD_SIZE_LEN;
+
+    // result length STATUS[1] PADDING[3] VALUE[4]
+    const I_CONFIG_READ_RES_LEN: usize = RES_STATUS_LEN + 7;
+
+    pub struct ConfigReadCmd {
+        size: u16,
+        data: [u8; I_CONFIG_READ_CMD_LEN],
+    }
+
+    impl ConfigReadCmd {
+        pub fn create<R: RegisterAddr>(addr: R) -> Self {
+            let mut data = [0_u8; I_CONFIG_READ_CMD_LEN];
+            let addr = addr.register_addr();
+            data[0] = I_CONFIG_READ_CMD_ID;
+            data[1] = addr[0];
+            data[2] = addr[1];
+            let size = (I_CONFIG_READ_CMD_LEN) as u16;
+            Self { data, size }
+        }
+    }
+
+    impl PlaintextCmd<{ I_CONFIG_READ_CMD_LEN }> for ConfigReadCmd {
+        fn size(&self) -> u16 {
+            self.size
+        }
+
+        fn data(self) -> [u8; I_CONFIG_READ_CMD_LEN] {
+            self.data
+        }
+    }
+
+    pub struct ConfigReadResp<T: common::config::RegisterValue> {
+        pub len: u16,
+        pub status: Status,
+        pub padding: [u8; 3],
+        pub value: T,
+    }
+
+    #[cfg(feature = "display")]
+    impl<T> core::fmt::Display for ConfigReadResp<T>
+    where
+        // T: Flags<Bits = u32> + core::fmt::Display,
+        T: common::config::RegisterValue + core::fmt::Display,
+    {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_fmt(format_args!(
+                "status: {:?}, padding: {:?}, value: {}",
+                self.status, self.padding, self.value
+            ))
+        }
+    }
+
+    impl<T: common::config::RegisterValue> TryFrom<Response<I_CONFIG_READ_RES_LEN>>
+        for ConfigReadResp<T>
+    {
+        type Error = Error;
+
+        fn try_from(resp: Response<I_CONFIG_READ_RES_LEN>) -> Result<Self, Self::Error> {
+            let value = u32::from_le_bytes(
+                resp.data[3..7]
+                    .try_into()
+                    .map_err(|_| Error::ReadConfigBytes)?,
+            );
+
+            let value = T::from_u32(value);
+
+            Ok(Self {
+                len: resp.len,
+                status: resp.status,
+                padding: resp.data[..3].try_into().unwrap(),
+                value,
+            })
+        }
+    }
+
+    #[cfg(test)]
+    pub mod tests {
+
+        extern crate alloc;
+
+        use embedded_hal_mock::eh1::delay::CheckedDelay;
+
+        use super::*;
+        use crate::{common::config::bootloader, l3};
+
+        #[test]
+        fn test_config_write() {
+            let mut mocked_delay = CheckedDelay::new([]);
+
+            let (mut mocked_spi_device, mut mocked_session) =
+                super::super::tests::get_mocked_spi_device_and_session(
+                    &[
+                        4,
+                        22,
+                        I_CONFIG_WRITE_CMD_LEN as u8,
+                        0,
+                        I_CONFIG_WRITE_CMD_ID,
+                        8,
+                        0,
+                        5,
+                    ],
+                    &[Status::Ok as u8],
+                );
+
+            let addr = bootloader::SensorRegAddr;
+            let bit_index = 5;
+
+            l3::send(
+                &mut mocked_spi_device,
+                &mut mocked_delay,
+                ConfigWriteCmd::create(addr, bit_index),
+                &mut mocked_session,
+            )
+            .expect("failed to send command");
+
+            let result = l3::receive(
+                &mut mocked_spi_device,
+                &mut mocked_delay,
+                &mut mocked_session,
+            )
+            .expect("failed to get result");
+
+            let write_result: ConfigWriteResp = result.try_into().expect("failed to parse result");
+
+            assert_eq!(write_result.status, Status::Ok);
+            assert_eq!(write_result.len, I_CONFIG_WRITE_RES_LEN as u16 - 1);
+
+            mocked_delay.done();
+            mocked_spi_device.done();
+        }
+
+        #[test]
+        fn test_config_read() {
+            let mut mocked_delay = CheckedDelay::new([]);
+
+            let (mut mocked_spi_device, mut mocked_session) =
+                super::super::tests::get_mocked_spi_device_and_session(
+                    &[
+                        4,
+                        21,
+                        I_CONFIG_READ_CMD_LEN as u8,
+                        0,
+                        I_CONFIG_READ_CMD_ID,
+                        8,
+                        0,
+                    ],
+                    &[Status::Ok as u8, 0, 0, 0, 255, 255, 255, 255],
+                );
+
+            let addr = bootloader::SensorRegAddr;
+
+            l3::send(
+                &mut mocked_spi_device,
+                &mut mocked_delay,
+                ConfigReadCmd::create(addr),
+                &mut mocked_session,
+            )
+            .expect("failed to send command");
+
+            let result = l3::receive(
+                &mut mocked_spi_device,
+                &mut mocked_delay,
+                &mut mocked_session,
+            )
+            .expect("failed to get result");
+
+            let read_result: ConfigReadResp<bootloader::StartUp> =
+                result.try_into().expect("failed to parse result");
+
+            assert_eq!(read_result.status, Status::Ok);
+            assert_eq!(read_result.len, I_CONFIG_READ_RES_LEN as u16 - 1);
+            assert_eq!(read_result.value.bits(), u32::MAX);
 
             mocked_delay.done();
             mocked_spi_device.done();
@@ -1113,11 +1389,8 @@ pub mod tests {
 
     pub(crate) fn send_resp_ok() -> [embedded_hal_mock::eh1::spi::Transaction<u8>; 7] {
         let mut request_resp_crc = 902u16.to_be_bytes().to_vec();
-        request_resp_crc.extend_from_slice(
-            &core::iter::repeat(0)
-                .take(255)
-                .collect::<alloc::vec::Vec<u8>>(),
-        );
+        request_resp_crc
+            .extend_from_slice(&core::iter::repeat_n(0, 255).collect::<alloc::vec::Vec<u8>>());
 
         [
             SpiMockTransaction::transaction_start(),
@@ -1175,9 +1448,8 @@ pub mod tests {
             .to_be_bytes(),
         );
 
-        let vec_of_zeros: alloc::vec::Vec<u8> = core::iter::repeat(0)
-            .take(255 + 3 - respons.len())
-            .collect();
+        let vec_of_zeros: alloc::vec::Vec<u8> =
+            core::iter::repeat_n(0, 255 + 3 - respons.len()).collect();
         respons.extend_from_slice(&vec_of_zeros);
 
         exp_spi_transaction.extend_from_slice(

@@ -6,7 +6,7 @@ const L2_CHUNK_MAX_DATA_SIZE: usize = 252;
 #[allow(unused)]
 const LEN_MIN: usize = 1;
 /// Maximal number of data bytes in one L1 transfer
-pub(crate) const LEN_MAX: usize = 1 + 1 + 1 + L2_CHUNK_MAX_DATA_SIZE + 2;
+pub const LEN_MAX: usize = 1 + 1 + 1 + L2_CHUNK_MAX_DATA_SIZE + 2;
 
 /// Max number of GET_INFO requests when chip is not answering
 pub const READ_MAX_TRIES: usize = 10;
@@ -122,11 +122,18 @@ pub(crate) fn receive<
 
     while retry > 0 {
         retry -= 1;
+
+        let data_op = match data.len() {
+            // in case data is empty let's use DelayNs(0) as noop
+            0 => embedded_hal::spi::Operation::DelayNs(0),
+            _ => embedded_hal::spi::Operation::TransferInPlace(&mut data),
+        };
+
         let mut operations = [
             embedded_hal::spi::Operation::Transfer(&mut chip_status, &req),
             embedded_hal::spi::Operation::TransferInPlace(&mut status),
             embedded_hal::spi::Operation::TransferInPlace(&mut len),
-            embedded_hal::spi::Operation::TransferInPlace(&mut data),
+            data_op,
             embedded_hal::spi::Operation::TransferInPlace(&mut crc),
         ];
 
