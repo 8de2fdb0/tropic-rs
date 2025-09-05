@@ -11,9 +11,9 @@ pub mod tropic;
 
 pub mod cert_store {
     #[cfg(test)]
-    pub(crate) use crate::l2::cert::tests::{MockCertificate, MockDecoder};
+    pub use crate::l2::cert::tests::{MockCertificate, MockDecoder};
 
-    pub use crate::l2::cert_store::{CertStore, Error as CertStoreError};
+    pub use crate::l2::cert_store::{CERT_BUFFER_LEN, CertStore, Error as CertStoreError};
 
     pub use crate::l2::cert::{
         CertDecoder, CertKind, Certificate, Error, ErrorKind, ErrorType, PubKeyAlgorithm,
@@ -22,3 +22,8 @@ pub mod cert_store {
 }
 
 pub use tropic::{Error, Tropic01};
+
+#[cfg(test)]
+pub mod mocks {
+    pub use crate::l2::cert::tests::{MockCertificate, MockDecoder};
+}

@@ -22,7 +22,7 @@ pub enum SamplePairingKey {
 impl SamplePairingKey {
     pub fn to_x25519_secret(&self) -> StaticSecret {
         match self {
-            SamplePairingKey::Sample0 => PRIV_ENGINEERING_SAMPLE01.into(),
+            SamplePairingKey::Sample0 => PRIVKEY_ENGINEERING_SAMPLE01.into(),
             SamplePairingKey::AttestSlot => SAMPLE_S_HOST_PRIVKEY_ATTEST_SLOT.into(),
             SamplePairingKey::ReadSerial => SAMPLE_S_HOST_PRIVKEY_READ_SERIAL.into(),
             SamplePairingKey::App => SAMPLE_S_HOST_PRIVKEY_APP.into(),
@@ -30,7 +30,7 @@ impl SamplePairingKey {
     }
 }
 
-const PRIV_ENGINEERING_SAMPLE01: [u8; 32] = [
+const PRIVKEY_ENGINEERING_SAMPLE01: [u8; 32] = [
     0xd0, 0x99, 0x92, 0xb1, 0xf1, 0x7a, 0xbc, 0x4d, 0xb9, 0x37, 0x17, 0x68, 0xa2, 0x7d, 0xa0, 0x5b,
     0x18, 0xfa, 0xb8, 0x56, 0x13, 0xa7, 0x84, 0x2c, 0xa6, 0x4c, 0x79, 0x10, 0xf2, 0x2e, 0x71, 0x6b,
 ];

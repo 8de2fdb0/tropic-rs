@@ -2,9 +2,7 @@
 
 pub(crate) mod cert;
 pub(crate) mod cert_store;
-pub(crate) mod info;
-
-pub use cert_store::CERT_BUFFER_LEN;
+pub mod info;
 
 use core::fmt::Debug;
 
@@ -43,6 +41,8 @@ pub enum Error {
     EncCmdRespSize(usize, usize),
     CertStore(cert_store::Error),
     NoSession,
+    ChipMode(l1::ChipMode),
+    UnknwonFirmwareHeaderSize,
 }
 
 #[cfg(feature = "display")]
@@ -71,6 +71,12 @@ impl core::fmt::Display for Error {
             Self::RespMaxLoops => f.write_fmt(format_args!("l2: response max loops reached")),
             Self::CertStore(err) => f.write_fmt(format_args!("cert store error: {}", err)),
             Self::NoSession => f.write_fmt(format_args!("secure session not established")),
+            Self::ChipMode(mode) => {
+                f.write_fmt(format_args!("chip is in wrong mode, expected: {:?}", mode))
+            }
+            Self::UnknwonFirmwareHeaderSize => {
+                f.write_fmt(format_args!("unknown firmware header size"))
+            }
         }
     }
 }
@@ -441,7 +447,7 @@ pub mod log {
     }
 }
 
-pub mod enc_cmd {
+pub mod enc_session {
     use crate::l3;
 
     use super::*;
@@ -499,7 +505,12 @@ pub mod enc_cmd {
             }
 
             let mut chunks = [[0u8; CHUNK_MAX_DATA_SIZE + 4]; MAX_CHUNKS];
-            let mut last_chunk_len = 0usize;
+
+            // set last chunk size to CHUNK_MAX_DATA_SIZE + 4
+            // so in case l3_cmd_stream fits exactly into a multiple of
+            // CHUNK_MAX_DATA_SIZE the last chunk has the correct size
+            // CMD_ID[1] + REQ_LEN[1] + data_len + CRC[2]
+            let mut last_chunk_len = CHUNK_MAX_DATA_SIZE + 4;
             let mut chunks_count = 0;
 
             let size_as_u8_arr = enc_cmd.size.to_le_bytes();
@@ -598,16 +609,38 @@ pub mod enc_cmd {
             match resp.status {
                 Status::ResultCont => {
                     seek += resp.len as usize;
-                    buff[offset..seek].copy_from_slice(&resp.data[..seek]);
-                    offset += seek;
+                    buff[offset..seek].copy_from_slice(&resp.data[..resp.len as usize]);
+                    offset += resp.len as usize;
                 }
                 Status::ResultOk => {
                     seek += resp.len as usize;
-                    buff[offset..seek].copy_from_slice(&resp.data[..seek]);
+                    buff[offset..seek].copy_from_slice(&resp.data[..resp.len as usize]);
                     return Ok(());
                 }
                 _ => return Err(Error::RespErr(resp.status)),
             }
+        }
+    }
+
+    const ENCRYPTED_SESSION_ABT_ID: u8 = 0x08;
+    /** @brief Request length */
+    const ENCRYPTED_SESSION_ABT_LEN: u8 = 0;
+
+    /** @brief Response length */
+    pub(crate) const ENCRYPTED_SESSION_ABT_RSP_LEN: usize = 0;
+
+    const ENCRYPTED_SESSION_ABT_CMD_LEN: usize =
+        CMD_ID_LEN + CMD_SIZE_LEN + ENCRYPTED_SESSION_ABT_LEN as usize + CMD_CRC_LEN;
+
+    /// Request to abort current Secure Channel Session and
+    /// execution of L3 command (TROPIC01 moves to Idle Mode).
+    pub struct SessionAbortReq;
+
+    impl SessionAbortReq {
+        pub fn create() -> Result<[u8; ENCRYPTED_SESSION_ABT_CMD_LEN], Error> {
+            let mut data = [ENCRYPTED_SESSION_ABT_ID, ENCRYPTED_SESSION_ABT_LEN, 0, 0];
+            add_crc(&mut data)?;
+            Ok(data)
         }
     }
 
@@ -632,8 +665,8 @@ pub mod enc_cmd {
 
         fn create_data<const N: usize>() -> [u8; N] {
             let mut data = [0_u8; N];
-            for i in 0..N {
-                data[i] = i as u8;
+            for (i, item) in data.iter_mut().enumerate().take(N) {
+                *item = i as u8;
             }
             data
         }
@@ -676,7 +709,7 @@ pub mod enc_cmd {
 
             let enc_cmd = l3::Request {
                 size: 300,
-                data: data.clone(),
+                data,
                 tag: TEST_TAG,
             };
 
@@ -703,7 +736,7 @@ pub mod enc_cmd {
 
             let enc_cmd = l3::Request {
                 size: 550,
-                data: data.clone(),
+                data,
                 tag: TEST_TAG,
             };
 
@@ -735,7 +768,7 @@ pub mod enc_cmd {
 
             let plaintext_cmd = l3::Request {
                 size: 5,
-                data: data.clone(),
+                data,
                 tag: test_tag,
             };
 

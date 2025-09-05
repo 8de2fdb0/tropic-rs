@@ -84,7 +84,7 @@ where
         &self,
         kind: crate::cert_store::CertKind,
     ) -> Result<x25519_dalek::PublicKey, Error> {
-        let key = self.get_pubke_as_bytes(kind)?;
+        let key = self.get_pubkey_as_bytes(kind)?;
         if key.len() != 32 {
             return Err(Error::PubKeyWrongSize(key.len()));
         }
@@ -92,15 +92,18 @@ where
         Ok(key.into())
     }
 
-    pub fn get_pubke_as_bytes(&self, kind: crate::cert_store::CertKind) -> Result<&'a [u8], Error> {
+    pub fn get_pubkey_as_bytes(
+        &self,
+        kind: crate::cert_store::CertKind,
+    ) -> Result<&'a [u8], Error> {
         if let Some(cert) = self
             .certificates
             .iter()
             .find(|&c| {
-                if let Some(c) = c {
-                    if *c.kind() == kind {
-                        return true;
-                    }
+                if let Some(c) = c
+                    && *c.kind() == kind
+                {
+                    return true;
                 }
                 false
             })
@@ -125,7 +128,7 @@ pub(crate) fn request_cert_store<
     // 1. Parse the header from the first packet (p0).
     let req = info::GetInfoReq::create(
         info::GetInfoObjectId::X509Certificate,
-        info::BlocIndex::CeryStore(0),
+        info::BlocIndex::CertStore(0),
     )?;
 
     spi_device.write(&req)?;
@@ -171,7 +174,7 @@ pub(crate) fn request_cert_store<
     for i in 1..total_packets_needed {
         let req = info::GetInfoReq::create(
             info::GetInfoObjectId::X509Certificate,
-            info::BlocIndex::CeryStore(i as u8),
+            info::BlocIndex::CertStore(i as u8),
         )?;
 
         spi_device.write(&req)?;

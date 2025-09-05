@@ -10,6 +10,12 @@ pub trait Error: Debug {
     fn kind(&self) -> ErrorKind;
 }
 
+impl Error for core::convert::Infallible {
+    fn kind(&self) -> ErrorKind {
+        ErrorKind::Other
+    }
+}
+
 /// Certificate error kind.
 ///
 /// This represents a common set of Certificate operation errors. Implementations are
@@ -112,15 +118,8 @@ pub trait CertDecoder: ErrorType + Sized {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use core::convert::Infallible;
 
-    impl super::Error for Infallible {
-        fn kind(&self) -> super::ErrorKind {
-            super::ErrorKind::Other
-        }
-    }
-
-    pub(crate) struct MockCertificate<'a> {
+    pub struct MockCertificate<'a> {
         kind: CertKind,
         pubkey: &'a [u8],
     }
@@ -141,7 +140,7 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) struct MockDecoder {
+    pub struct MockDecoder {
         #[allow(unused)]
         kind: CertKind,
         #[allow(unused)]
