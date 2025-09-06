@@ -28,7 +28,7 @@ pub(crate) const CHUNK_MAX_DATA_SIZE: usize = 252;
 pub(crate) const L2_MAX_FRAME_SIZE: usize =
     CMD_ID_LEN + CMD_SIZE_LEN + CHUNK_MAX_DATA_SIZE + CMD_CRC_LEN;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     Spi(embedded_hal::spi::ErrorKind),
     Crc(crate::crc16::Error),
@@ -42,7 +42,11 @@ pub enum Error {
     CertStore(cert_store::Error),
     NoSession,
     ChipMode(l1::ChipMode),
+    UnknownFirmwareType(u16),
     UnknwonFirmwareHeaderSize,
+    FwUpdateDataMin,
+    FwUpdateDataMax,
+    FwUpdateChunkLen,
 }
 
 #[cfg(feature = "display")]
@@ -74,8 +78,20 @@ impl core::fmt::Display for Error {
             Self::ChipMode(mode) => {
                 f.write_fmt(format_args!("chip is in wrong mode, expected: {:?}", mode))
             }
+            Self::UnknownFirmwareType(fw_type) => {
+                f.write_fmt(format_args!("unknown firmware type: {}", fw_type))
+            }
             Self::UnknwonFirmwareHeaderSize => {
                 f.write_fmt(format_args!("unknown firmware header size"))
+            }
+            Self::FwUpdateDataMin => {
+                f.write_fmt(format_args!("invalid firmware update data size: too small"))
+            }
+            Self::FwUpdateDataMax => {
+                f.write_fmt(format_args!("invalid firmware update data size: too large"))
+            }
+            Self::FwUpdateChunkLen => {
+                f.write_fmt(format_args!("invalid firmware update chunk length"))
             }
         }
     }
@@ -102,27 +118,33 @@ impl From<crate::l1::Error> for Error {
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Status {
-    /// Request was sucessfull
+    /// Request was sucessfull.
     RequestOk = 0x01,
-    /// Result was successfull
+    /// Result was successfull.
     ResultOk = 0x02,
-    /// There is more than one chunk to be expected for a current request
+    /// There is more than one chunk to be expected for the current request.
     RequestCont = 0x03,
-    /// There is more than one chunk to be received for a current response
+    /// There is more than one chunk to be received for the current response.
     ResultCont = 0x04,
-    /// There were an error during handshake establishing
+    /// Secure channel handshake failed
+    /// and secure session is not established.
     HskErr = 0x79,
-    /// There is no secure session
+    /// TROPIC01 is not in secure channel mode
+    /// and an [`enc_session::EncryptedCmdReq`] was sent.
+    /// TROPIC01 ignores the L2 request frame.
     NoSession = 0x7A,
-    /// There were error during checking message authenticity
+    /// Invalid L3 layer authentication.
+    /// TROPIC01 will invalidate the current session,
+    /// and move to idle mode.
     TagErr = 0x7B,
-    /// Request contained crc error
+    /// Incorrect CRC-16 checksum.
+    /// The associated L2 frame was ignored.
     CrcErr = 0x7C,
-    /// ID of last request is not known to TROPIC01
-    UnknownErr = 0x7E,
-    /// There were some other error
+    /// REQ_ID of last request is not known to TROPIC01.
+    UnknownReq = 0x7E,
+    /// Generic error from TROPIC01.
     GenErr = 0x7F,
-    /// No response on the SPI bus will read as a array full of 0xff
+    /// No response on the SPI bus will read as a array full of 0xff,
     /// So if status is 0xff, that means no response.
     /// TODO: add a real check to see if the whole response is 0xff
     NoResp = 0xFF,
@@ -141,7 +163,7 @@ impl TryFrom<u8> for Status {
             0x7A => Ok(Self::NoSession),
             0x7B => Ok(Self::TagErr),
             0x7C => Ok(Self::CrcErr),
-            0x7E => Ok(Self::UnknownErr),
+            0x7E => Ok(Self::UnknownReq),
             0x7F => Ok(Self::GenErr),
             0xFF => Ok(Self::NoResp),
             _ => Err(Error::InvalidStatus(value)),
@@ -155,7 +177,7 @@ impl From<Status> for u8 {
     }
 }
 
-pub(crate) struct Response<const N: usize> {
+pub struct Response<const N: usize> {
     pub(crate) chip_status: l1::ChipStatus,
     pub(crate) status: Status,
     pub(crate) len: u8,
@@ -193,7 +215,7 @@ impl<const N: usize> TryFrom<l1::Response<N>> for Response<N> {
             Status::HskErr
             | Status::TagErr
             | Status::CrcErr
-            | Status::UnknownErr
+            | Status::UnknownReq
             | Status::GenErr
             | Status::NoResp => {
                 return Err(Error::RespErr(l2_resp.status));
@@ -217,6 +239,55 @@ pub(crate) fn receive<
 ) -> Result<Response<N>, Error> {
     l1::receive(spi_device, delay)?.try_into()
 }
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+pub trait ReceiveResponse<const N: usize>: sealed::Sealed
+where
+    Self: TryFrom<Response<N>>,
+    <Self as TryFrom<Response<N>>>::Error: Into<Error>,
+{
+    fn receive<SPI: embedded_hal::spi::SpiDevice, D: embedded_hal::delay::DelayNs>(
+        spi_device: &mut SPI,
+        delay: &mut D,
+    ) -> Result<Self, Error> {
+        let resp: Response<N> = l1::receive(spi_device, delay)?.try_into()?;
+        let item = Self::try_from(resp).map_err(Into::into)?;
+        Ok(item)
+    }
+}
+
+const STATUS_RSP_LEN: usize = 0;
+
+/// Common type for all responses that only return a status.
+#[derive(Debug)]
+pub struct StatusResp {
+    /// CHIP_STATUS byte
+    pub chip_status: l1::ChipStatus,
+    /// L2 status byte
+    pub status: Status,
+    /// Length of incoming data
+    pub len: u8,
+    /// Checksum
+    pub crc: [u8; 2],
+}
+
+impl From<Response<{ STATUS_RSP_LEN }>> for StatusResp {
+    fn from(resp: Response<{ STATUS_RSP_LEN }>) -> Self {
+        Self {
+            chip_status: resp.chip_status,
+            status: resp.status,
+            len: resp.len,
+            crc: resp.crc,
+        }
+    }
+}
+
+impl sealed::Sealed for StatusResp {}
+
+impl ReceiveResponse<{ STATUS_RSP_LEN }> for StatusResp {}
 
 pub mod handshake {
     use super::*;
@@ -283,6 +354,10 @@ pub mod handshake {
             }
         }
     }
+
+    impl sealed::Sealed for HandshakeResp {}
+
+    impl ReceiveResponse<{ HANDSHAKE_RSP_LEN }> for HandshakeResp {}
 }
 
 pub mod sleep {
@@ -291,7 +366,8 @@ pub mod sleep {
     const SLEEP_REQ_ID: u8 = 0x20;
     const SLEEP_REQ_LEN: u8 = 0x01;
 
-    const SLEEP_RSP_LEN: usize = 0x00;
+    #[allow(unused)]
+    pub(crate) const SLEEP_RSP_LEN: usize = 0x00;
 
     #[repr(u8)]
     pub enum SleepKind {
@@ -310,27 +386,8 @@ pub mod sleep {
         }
     }
 
-    pub struct SleepResp {
-        /// CHIP_STATUS byte
-        pub chip_status: l1::ChipStatus,
-        /// L2 status byte
-        pub status: Status,
-        /// Length of incoming data
-        pub len: u8,
-        /// Checksum
-        pub crc: [u8; 2],
-    }
-
-    impl From<Response<{ SLEEP_RSP_LEN }>> for SleepResp {
-        fn from(resp: Response<{ SLEEP_RSP_LEN }>) -> Self {
-            Self {
-                chip_status: resp.chip_status,
-                status: resp.status,
-                len: resp.len,
-                crc: resp.crc,
-            }
-        }
-    }
+    /// Response from TROPIC01 afyer requesting sleep mode.
+    pub type SleepResp = StatusResp;
 }
 
 // todo: think about renaming to reboot
@@ -340,7 +397,8 @@ pub mod restart {
     const STARTUP_REQ_ID: u8 = 0xb3;
     const STARTUP_REQ_LEN: u8 = 0x1;
 
-    pub(crate) const STARTUP_RSP_LEN: usize = 0x0;
+    #[allow(unused)]
+    const STARTUP_RSP_LEN: usize = 0x0;
 
     const STARTUP_CMD_LEN: usize =
         CMD_ID_LEN + CMD_SIZE_LEN + STARTUP_REQ_LEN as usize + CMD_CRC_LEN;
@@ -363,27 +421,7 @@ pub mod restart {
     }
 
     /// Response from TROPIC01 afyer requesting a reset.
-    pub struct StartupResp {
-        /// CHIP_STATUS byte
-        pub chip_status: l1::ChipStatus,
-        /// L2 status byte
-        pub status: Status,
-        /// Length of incoming data
-        pub len: u8,
-        /// Checksum
-        pub crc: [u8; 2],
-    }
-
-    impl From<Response<{ STARTUP_RSP_LEN }>> for StartupResp {
-        fn from(resp: Response<{ STARTUP_RSP_LEN }>) -> Self {
-            Self {
-                chip_status: resp.chip_status,
-                status: resp.status,
-                len: resp.len,
-                crc: resp.crc,
-            }
-        }
-    }
+    pub type StartupResp = StatusResp;
 }
 
 pub mod log {
@@ -445,6 +483,10 @@ pub mod log {
             }
         }
     }
+
+    impl sealed::Sealed for GetLogResp {}
+
+    impl ReceiveResponse<{ GET_LOG_RSP_MAX_LEN }> for GetLogResp {}
 }
 
 pub mod enc_session {
@@ -622,11 +664,13 @@ pub mod enc_session {
         }
     }
 
+    // request id
     const ENCRYPTED_SESSION_ABT_ID: u8 = 0x08;
-    /** @brief Request length */
+    // request length
     const ENCRYPTED_SESSION_ABT_LEN: u8 = 0;
 
-    /** @brief Response length */
+    //  response length
+    #[allow(unused)]
     pub(crate) const ENCRYPTED_SESSION_ABT_RSP_LEN: usize = 0;
 
     const ENCRYPTED_SESSION_ABT_CMD_LEN: usize =
@@ -643,6 +687,9 @@ pub mod enc_session {
             Ok(data)
         }
     }
+
+    /// Response from TROPIC01 afyer requesting a session abort.
+    pub type SessionAbortResp = StatusResp;
 
     #[cfg(test)]
     pub(crate) mod tests {
@@ -794,6 +841,559 @@ pub mod enc_session {
             add_crc(&mut crc_data).expect("unable to create crc");
             assert_eq!(crc_data[25], 23);
             assert_eq!(crc_data[26], 91);
+        }
+    }
+}
+
+pub mod resend {
+    use super::*;
+
+    // request id
+    const RESEND_REQ_ID: u8 = 0x10;
+    // request length
+    const RESEND_REQ_LEN: u8 = 0;
+
+    // response length
+    #[allow(unused)]
+    pub(crate) const RESEND_RSP_LEN: usize = 0;
+
+    const RESEND_CMD_LEN: usize = CMD_ID_LEN + CMD_SIZE_LEN + RESEND_REQ_LEN as usize + CMD_CRC_LEN;
+
+    pub struct ResendReq;
+
+    impl ResendReq {
+        pub fn create() -> Result<[u8; RESEND_CMD_LEN], Error> {
+            let mut data = [RESEND_REQ_ID, RESEND_REQ_LEN, 0, 0];
+            add_crc(&mut data)?;
+            Ok(data)
+        }
+    }
+
+    pub type ResendResp = StatusResp;
+}
+
+pub mod mutable_firmware {
+    use super::*;
+
+    // request id
+    const ERASE_REQ_ID: u8 = 0xb2;
+    // request length
+    const ERASE_REQ_LEN: usize = 1;
+
+    const ERASE_CMD_LEN: usize = CMD_ID_LEN + CMD_SIZE_LEN + ERASE_REQ_LEN + CMD_CRC_LEN;
+
+    // Response length
+    #[allow(unused)]
+    const ERASE_RSP_LEN: usize = 0;
+
+    pub struct EraseReq {}
+
+    impl EraseReq {
+        pub fn create(bank_id: info::BankId) -> Result<[u8; ERASE_CMD_LEN], Error> {
+            let mut data = [ERASE_REQ_ID, ERASE_CMD_LEN as u8, bank_id as u8, 0, 0];
+            add_crc(&mut data)?;
+            Ok(data)
+        }
+    }
+
+    pub type EraseResp = StatusResp;
+
+    #[cfg(feature = "abab")]
+    pub mod abab {
+        //! Firmware update API structs for ABAB silicon revision
+
+        use super::super::*;
+
+        // request id
+        const UPDATE_REQ_ID: u8 = 0xb1;
+        // request min length
+        const UPDATE_REQ_LEN_MIN: usize = 3;
+        // minimal length of field data
+        const UPDATE_REQ_DATA_LEN_MIN: usize = 4;
+        // maximal length of field data
+        const UPDATE_REQ_DATA_LEN_MAX: usize = 248;
+
+        const UPDATE_CMD_LEN: usize =
+            CMD_ID_LEN + CMD_SIZE_LEN + UPDATE_REQ_LEN_MIN + UPDATE_REQ_DATA_LEN_MAX + CMD_CRC_LEN;
+
+        pub struct FwUpdateReq {}
+
+        impl FwUpdateReq {
+            pub fn create(
+                bank_id: info::BankId,
+                offset: u16,
+                update_data: &[u8],
+            ) -> Result<[u8; UPDATE_CMD_LEN], Error> {
+                let data_len = update_data.len();
+
+                if data_len < UPDATE_REQ_DATA_LEN_MIN {
+                    return Err(Error::FwUpdateDataMin);
+                }
+                if data_len > UPDATE_REQ_DATA_LEN_MAX {
+                    return Err(Error::FwUpdateDataMax);
+                }
+
+                let mut data = [0_u8; UPDATE_CMD_LEN];
+                data[0] = UPDATE_REQ_ID;
+                data[1] = (UPDATE_REQ_LEN_MIN + data_len) as u8;
+                data[2] = bank_id as u8;
+                data[3..5].copy_from_slice(&offset.to_le_bytes());
+                data[5..data_len + 5].copy_from_slice(update_data);
+                data[data_len + 5] = 0;
+                data[data_len + 6] = 0;
+                add_crc(&mut data)?;
+                Ok(data)
+            }
+        }
+
+        pub type UpdateResp = StatusResp;
+
+        #[cfg(test)]
+        mod tests {
+            extern crate alloc;
+
+            use alloc::vec;
+            use rand::RngCore;
+
+            use crate::l2::info::BankId;
+
+            use super::*;
+
+            #[test]
+            fn test_create_update_req() {
+                let offset = 0;
+                let len = rand::random_range(0..UPDATE_REQ_DATA_LEN_MAX);
+                let mut data = vec![0_u8; len];
+                rand::rng().fill_bytes(&mut data);
+
+                let fw_update_req = FwUpdateReq::create(BankId::FwBankFw1, offset, &data)
+                    .expect("failed to create update request");
+
+                assert_eq!(fw_update_req[0], UPDATE_REQ_ID);
+                assert_eq!(fw_update_req[1], (UPDATE_REQ_LEN_MIN + data.len()) as u8);
+                assert_eq!(fw_update_req[2], BankId::FwBankFw1 as u8);
+                assert_eq!(fw_update_req[3..5], offset.to_le_bytes());
+                assert_eq!(fw_update_req[5..data.len() + 5], data);
+
+                let offset = 22;
+                let len = rand::random_range(0..UPDATE_REQ_DATA_LEN_MAX);
+                let mut data = vec![0_u8; len];
+                rand::rng().fill_bytes(&mut data);
+
+                let fw_update_req = FwUpdateReq::create(BankId::FwBankSpect1, offset, &data)
+                    .expect("failed to create update request");
+
+                assert_eq!(fw_update_req[0], UPDATE_REQ_ID);
+                assert_eq!(fw_update_req[1], (UPDATE_REQ_LEN_MIN + data.len()) as u8);
+                assert_eq!(fw_update_req[2], BankId::FwBankSpect1 as u8);
+                assert_eq!(fw_update_req[3..5], offset.to_le_bytes());
+                assert_eq!(fw_update_req[5..data.len() + 5], data);
+            }
+
+            #[test]
+            fn test_fail() {
+                let offset = 0;
+                let data = [0_u8; UPDATE_REQ_DATA_LEN_MIN - 1];
+
+                let result = FwUpdateReq::create(BankId::FwBankFw1, offset, &data);
+                assert!(result.is_err());
+                assert_eq!(result.unwrap_err(), Error::FwUpdateDataMin);
+
+                let data = [0_u8; UPDATE_REQ_DATA_LEN_MAX + 1];
+
+                let result = FwUpdateReq::create(BankId::FwBankFw1, offset, &data);
+                assert!(result.is_err());
+                assert_eq!(result.unwrap_err(), Error::FwUpdateDataMax);
+            }
+        }
+    }
+
+    #[cfg(feature = "acab")]
+    pub mod acab {
+
+        use super::super::*;
+
+        // request id
+        const UPDATE_REQ_ID: u8 = 0xb0;
+        // request min length
+        const UPDATE_REQ_LEN: usize = 104;
+        // response length
+        #[allow(unused)]
+        const UPDATE_RSP_LEN: usize = 0;
+
+        const UPDATE_REQ_CMD_LEN: usize = CMD_ID_LEN + CMD_SIZE_LEN + UPDATE_REQ_LEN + CMD_CRC_LEN;
+
+        /// Firmware header
+        #[derive(Debug)]
+        pub struct UpdateReqHeader {
+            /// Length byte
+            _len: u8,
+            ///  Signature of SHA256 hash of all following data in this packet
+            signature: [u8; 64],
+            /// SHA256 HASH of first FW chunk of data sent using Mutable_FW_Update_Data
+            hash: [u8; 32],
+            /// FW type which is going to be updated
+            fw_type: info::FirmwareType,
+            /// Padding, zero value
+            padding: u8,
+            /// Version of used header
+            header_version: u8,
+            /// Version of FW
+            version: [u8; 4],
+        }
+
+        impl TryFrom<&[u8]> for UpdateReqHeader {
+            type Error = Error;
+
+            fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
+                if data.len() < UPDATE_REQ_LEN + 1 {
+                    return Err(Error::FwUpdateDataMin);
+                }
+                if data.len() > UPDATE_DATA_MAX_LEN {
+                    return Err(Error::FwUpdateDataMax);
+                }
+                if data[98] != 0 {
+                    // since there are only 2 firware types this bit should alwasy be 0
+                    return Err(Error::UnknownFirmwareType(u16::from_le_bytes(
+                        data[97..99].try_into().unwrap(),
+                    )));
+                }
+                Ok(Self {
+                    _len: data[0],
+                    signature: data[1..65].try_into().unwrap(),
+                    hash: data[65..97].try_into().unwrap(),
+                    // we only read firmwarre type from byte
+                    // there are only 2 possible values
+                    fw_type: data[97].try_into()?,
+                    padding: data[99],
+                    header_version: data[100],
+                    version: data[101..105].try_into().unwrap(),
+                })
+            }
+        }
+
+        impl UpdateReqHeader {
+            fn to_req(&self) -> [u8; UPDATE_REQ_LEN] {
+                let mut data = [0_u8; UPDATE_REQ_LEN];
+                data[0..64].copy_from_slice(&self.signature);
+                data[64..96].copy_from_slice(&self.hash);
+                data[96] = self.fw_type.clone() as u8;
+                data[97] = 0;
+                data[98] = self.padding;
+                data[99] = self.header_version;
+                data[100..104].copy_from_slice(&self.version);
+                data
+            }
+        }
+
+        pub struct UpdateReq {}
+
+        impl UpdateReq {
+            pub fn create(update_req: &[u8]) -> Result<[u8; UPDATE_REQ_CMD_LEN], Error> {
+                let update_req_header: UpdateReqHeader = update_req.try_into()?;
+
+                let mut data = [0_u8; UPDATE_REQ_CMD_LEN];
+                data[0] = UPDATE_REQ_ID;
+                data[1] = UPDATE_REQ_LEN as u8;
+                data[2..UPDATE_REQ_LEN + 2].copy_from_slice(&update_req_header.to_req());
+                data[UPDATE_REQ_LEN + 2] = 0;
+                data[UPDATE_REQ_LEN + 3] = 0;
+                add_crc(&mut data)?;
+                Ok(data)
+            }
+        }
+
+        pub type UpdateResp = StatusResp;
+
+        // request id
+        const UPDATE_DATA_REQ_ID: u8 = 0xb1;
+
+        // maximum size of update data
+        const UPDATE_DATA_MAX_LEN: usize = 30720;
+
+        // maximum firmware update chunk size HASH[32] + OFFSET[2] + DATA[220]
+        const UPDATE_DATA_MAX_CHUNK_LEN: usize = 32 + 2 + 220;
+
+        // maximum amount of chunks
+        const UPDATE_DATA_MAX_CHUNKS: usize =
+            UPDATE_DATA_MAX_LEN.div_ceil(UPDATE_DATA_MAX_CHUNK_LEN);
+
+        const UPDATE_DATA_CMD_MAX_LEN: usize =
+            CMD_ID_LEN + CMD_SIZE_LEN + UPDATE_DATA_MAX_CHUNK_LEN + CMD_CRC_LEN;
+
+        #[derive(Debug, Clone, Copy)]
+        pub struct UpdateDataChunk {
+            len: usize,
+            hash: [u8; 32],
+            offset: u16,
+            data: [u8; 220],
+        }
+
+        impl UpdateDataChunk {
+            pub(crate) fn command(&self) -> Result<[u8; UPDATE_DATA_CMD_MAX_LEN], Error> {
+                let mut data = [0_u8; UPDATE_DATA_CMD_MAX_LEN];
+                data[0] = UPDATE_DATA_REQ_ID;
+                data[1] = self.len as u8;
+                data[2..34].copy_from_slice(&self.hash);
+                data[34..36].copy_from_slice(&self.offset.to_le_bytes());
+                data[36..self.len + 2].copy_from_slice(&self.data[0..self.len - 34]);
+                add_crc(&mut data)?;
+                Ok(data)
+            }
+        }
+
+        impl Default for UpdateDataChunk {
+            fn default() -> Self {
+                Self {
+                    len: 0,
+                    hash: [0_u8; 32],
+                    offset: 0,
+                    data: [0_u8; 220],
+                }
+            }
+        }
+
+        pub struct UpdateDataReq {
+            pub count: usize,
+            pub chunks: [UpdateDataChunk; UPDATE_DATA_MAX_CHUNKS],
+        }
+
+        impl UpdateDataReq {
+            pub fn create(update_req: &[u8]) -> Result<Self, Error> {
+                let update_req_len = update_req.len();
+                if update_req_len > UPDATE_DATA_MAX_LEN {
+                    return Err(Error::FwUpdateDataMax);
+                }
+                let mut chunk_idx = UPDATE_REQ_LEN + 1;
+                let mut count = 0;
+                let mut chunks = [UpdateDataChunk::default(); UPDATE_DATA_MAX_CHUNKS];
+
+                while chunk_idx < update_req_len {
+                    let chunk_len = update_req[chunk_idx] as usize;
+                    if chunk_len > 32 + 16 + UPDATE_DATA_MAX_CHUNK_LEN {
+                        return Err(Error::FwUpdateChunkLen);
+                    }
+                    let offset = chunk_idx + 1;
+                    // let seek = chunk_idx + 1 + chunk_len;
+                    chunks[count].len = chunk_len;
+                    chunks[count]
+                        .hash
+                        .copy_from_slice(&update_req[offset..offset + 32]);
+                    chunks[count].offset = u16::from_le_bytes(
+                        update_req[offset + 32..offset + 34].try_into().unwrap(),
+                    );
+                    chunks[count].data[..chunk_len - 34]
+                        .copy_from_slice(&update_req[offset + 34..offset + chunk_len]);
+
+                    chunk_idx += chunk_len + 1;
+                    count += 1;
+                }
+
+                Ok(Self { count, chunks })
+            }
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use rand::RngCore;
+
+            use super::*;
+
+            include!("../../tests/firmware_update_files/boot_v2_0_0/fw_v1.0.0/fw_cpu.rs");
+            include!("../../tests/firmware_update_files/boot_v2_0_0/fw_v1.0.0/fw_spect.rs");
+
+            #[test]
+            fn test_create_update_req() {
+                let mut data = [0_u8; UPDATE_REQ_LEN + 1];
+                rand::rng().fill_bytes(&mut data);
+
+                // set coorect firmware version
+                data[97] = info::FirmwareType::Spect as u8;
+                data[98] = 0;
+
+                let update_req = UpdateReq::create(&data).expect("failed to create update request");
+
+                assert_eq!(update_req[0], UPDATE_REQ_ID);
+                assert_eq!(update_req[1], UPDATE_REQ_LEN as u8);
+                assert_eq!(update_req[2..UPDATE_REQ_LEN + 2], data[1..]);
+
+                let mut data = [0_u8; UPDATE_REQ_LEN + 1];
+                rand::rng().fill_bytes(&mut data);
+
+                // set coorect firmware version
+                data[97] = info::FirmwareType::Riscv as u8;
+                data[98] = 0;
+
+                let update_req = UpdateReq::create(&data).expect("failed to create update request");
+
+                assert_eq!(update_req[0], UPDATE_REQ_ID);
+                assert_eq!(update_req[1], UPDATE_REQ_LEN as u8);
+                assert_eq!(update_req[2..UPDATE_REQ_LEN + 2], data[1..]);
+            }
+
+            #[test]
+            fn test_create_update_data_req() {
+                // HEADER[LEN[1] + UPDATE_REQ_LEN[140]] + LEN[1] + 4 * [MAX_CHUNK[220] + LEN[1]] + LAST_CHUNK[220]
+                let mut data = [0_u8;
+                    (1 + UPDATE_REQ_LEN) + 1 + (4 * (UPDATE_DATA_MAX_CHUNK_LEN + 1)) + (120)];
+                rand::rng().fill_bytes(&mut data);
+
+                data[UPDATE_REQ_LEN + 1] = UPDATE_DATA_MAX_CHUNK_LEN as u8;
+                data[UPDATE_REQ_LEN + (UPDATE_DATA_MAX_CHUNK_LEN + 1) + 1] =
+                    UPDATE_DATA_MAX_CHUNK_LEN as u8;
+                data[UPDATE_REQ_LEN + (2 * (UPDATE_DATA_MAX_CHUNK_LEN + 1)) + 1] =
+                    UPDATE_DATA_MAX_CHUNK_LEN as u8;
+                data[UPDATE_REQ_LEN + (3 * (UPDATE_DATA_MAX_CHUNK_LEN + 1)) + 1] =
+                    UPDATE_DATA_MAX_CHUNK_LEN as u8;
+                data[UPDATE_REQ_LEN + (4 * (UPDATE_DATA_MAX_CHUNK_LEN + 1)) + 1] = 120 as u8;
+
+                let update_data_req =
+                    UpdateDataReq::create(&data).expect("failed to create update data request");
+
+                assert_eq!(update_data_req.count, 5);
+            }
+
+            #[test]
+            fn test_read_fw_spect_file() {
+                const EXP_FW_REQ: [u8; 108] = [
+                    176, 104, 171, 240, 167, 122, 80, 206, 221, 85, 61, 176, 241, 118, 159, 203,
+                    106, 103, 245, 203, 252, 36, 118, 178, 82, 160, 74, 141, 229, 45, 212, 46, 137,
+                    77, 246, 189, 192, 224, 199, 149, 19, 114, 173, 204, 72, 134, 58, 125, 218,
+                    107, 139, 63, 26, 134, 132, 97, 201, 19, 121, 81, 43, 63, 117, 169, 228, 12,
+                    72, 93, 240, 107, 18, 20, 82, 119, 150, 51, 186, 52, 40, 235, 128, 87, 61, 148,
+                    230, 52, 124, 112, 86, 168, 1, 47, 229, 15, 127, 78, 47, 28, 2, 0, 0, 1, 0, 0,
+                    0, 1, 114, 168,
+                ];
+
+                let update_req =
+                    UpdateReq::create(&FW_SPECT).expect("failed to create update request");
+
+                assert_eq!(EXP_FW_REQ, update_req);
+
+                let update_req_header: UpdateReqHeader = FW_SPECT
+                    .as_slice()
+                    .try_into()
+                    .expect("failed to create fw update header");
+
+                assert_eq!(update_req_header.fw_type, info::FirmwareType::Spect);
+
+                let update_data_req =
+                    UpdateDataReq::create(&FW_SPECT).expect("failed to create update data request");
+
+                assert_eq!(update_data_req.count, 49);
+
+                for i in 0..update_data_req.count - 1 {
+                    assert_eq!(update_data_req.chunks[i].len, 250);
+                    assert_eq!(update_data_req.chunks[i].offset, (i * 216) as u16);
+                }
+
+                assert_eq!(update_data_req.chunks[update_data_req.count - 1].len, 74);
+                assert_eq!(
+                    update_data_req.chunks[update_data_req.count - 1].offset,
+                    (update_data_req.count - 1) as u16 * 216
+                );
+            }
+
+            #[test]
+            fn test_read_fw_spect_file_commands() {
+                let update_data_req =
+                    UpdateDataReq::create(&FW_SPECT).expect("failed to create update data request");
+
+                for i in 0..update_data_req.count - 1 {
+                    let cmd = update_data_req.chunks[i]
+                        .command()
+                        .expect("failed to create command from chunk");
+
+                    assert_eq!(cmd[0], UPDATE_DATA_REQ_ID);
+                    assert_eq!(cmd[1], 250);
+                    assert_eq!(
+                        u16::from_le_bytes(cmd[34..36].try_into().unwrap()),
+                        (i * 216) as u16
+                    );
+                }
+
+                let cmd = update_data_req.chunks[update_data_req.count - 1]
+                    .command()
+                    .expect("failed to create command from chunk");
+
+                assert_eq!(cmd[0], UPDATE_DATA_REQ_ID);
+                assert_eq!(cmd[1], 74);
+                assert_eq!(
+                    u16::from_le_bytes(cmd[34..36].try_into().unwrap()),
+                    (update_data_req.count - 1) as u16 * 216
+                );
+            }
+
+            #[test]
+            fn test_read_fw_cpu_file() {
+                const EXP_FW_REQ: [u8; 108] = [
+                    176, 104, 123, 31, 95, 138, 250, 255, 177, 161, 221, 203, 119, 203, 4, 1, 168,
+                    37, 157, 188, 81, 195, 38, 69, 162, 222, 85, 44, 213, 189, 156, 166, 119, 39,
+                    252, 41, 173, 217, 92, 178, 35, 218, 5, 143, 75, 170, 113, 141, 99, 155, 36,
+                    40, 0, 63, 244, 99, 41, 14, 66, 208, 9, 2, 116, 237, 100, 15, 15, 208, 117,
+                    182, 204, 177, 148, 62, 253, 7, 70, 195, 218, 190, 95, 201, 255, 57, 132, 19,
+                    90, 157, 182, 44, 101, 136, 46, 24, 3, 212, 194, 114, 1, 0, 0, 1, 0, 0, 0, 1,
+                    10, 227,
+                ];
+
+                let update_req =
+                    UpdateReq::create(&FW_CPU).expect("failed to create update request");
+
+                assert_eq!(EXP_FW_REQ, update_req);
+
+                let update_req_header: UpdateReqHeader = FW_CPU
+                    .as_slice()
+                    .try_into()
+                    .expect("failed to create fw update header");
+
+                assert_eq!(update_req_header.fw_type, info::FirmwareType::Riscv);
+
+                let update_data_req =
+                    UpdateDataReq::create(&FW_CPU).expect("failed to create update data request");
+
+                assert_eq!(update_data_req.count, 109);
+
+                for i in 0..update_data_req.count - 1 {
+                    assert_eq!(update_data_req.chunks[i].len, 250);
+                    assert_eq!(update_data_req.chunks[i].offset, (i * 216) as u16);
+                }
+
+                assert_eq!(update_data_req.chunks[update_data_req.count - 1].len, 46);
+                assert_eq!(
+                    update_data_req.chunks[update_data_req.count - 1].offset,
+                    (update_data_req.count - 1) as u16 * 216
+                );
+            }
+
+            #[test]
+            fn test_read_fw_cpu_file_commands() {
+                let update_data_req =
+                    UpdateDataReq::create(&FW_CPU).expect("failed to create update data request");
+
+                for i in 0..update_data_req.count - 1 {
+                    let cmd = update_data_req.chunks[i]
+                        .command()
+                        .expect("failed to create command from chunk");
+
+                    assert_eq!(cmd[0], UPDATE_DATA_REQ_ID);
+                    assert_eq!(cmd[1], 250);
+                    assert_eq!(
+                        u16::from_le_bytes(cmd[34..36].try_into().unwrap()),
+                        (i * 216) as u16
+                    );
+                }
+
+                let cmd = update_data_req.chunks[update_data_req.count - 1]
+                    .command()
+                    .expect("failed to create command from chunk");
+
+                assert_eq!(cmd[0], UPDATE_DATA_REQ_ID);
+                assert_eq!(cmd[1], 46);
+                assert_eq!(
+                    u16::from_le_bytes(cmd[34..36].try_into().unwrap()),
+                    (update_data_req.count - 1) as u16 * 216
+                );
+            }
         }
     }
 }

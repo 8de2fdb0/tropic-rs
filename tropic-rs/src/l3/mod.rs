@@ -152,6 +152,11 @@ impl TryFrom<u8> for Status {
     }
 }
 
+// L3 response.
+//
+// - len:    data length
+// - status: status byte
+// - data:   data, without the status byte
 pub(crate) struct Response<const N: usize> {
     pub(crate) len: u16,
     pub(crate) status: Status,
@@ -302,10 +307,10 @@ pub mod ping {
 
     // minimal length of field data_in
     #[allow(unused)]
-    const PING_CMD_DATA_LEN_MIN: usize = 0;
+    pub const PING_CMD_DATA_LEN_MIN: usize = 0;
 
     // maximal length of field data_in
-    const PING_CMD_DATA_LEN_MAX: usize = 4096;
+    pub const PING_CMD_DATA_LEN_MAX: usize = 4096;
 
     // command len CMD_ID[1] MSG[0-4096]
     const PING_CMD_DATE_LEN: usize = CMD_ID_LEN + PING_CMD_DATA_LEN_MAX;
@@ -315,10 +320,7 @@ pub mod ping {
     const PING_RES_LEN_MIN: usize = 1;
 
     // result length STATUS[1]  MSG[0-4096]
-    #[allow(unused)]
-    const PING_RES_LEN: usize = RES_STATUS_LEN + PING_LEN_MAX;
-
-    pub const PING_LEN_MAX: usize = CMD_DATA_SIZE_MAX - CMD_ID_LEN;
+    const PING_RES_LEN_MAX: usize = RES_STATUS_LEN + PING_CMD_DATA_LEN_MAX;
 
     pub struct PingCmd {
         size: u16,
@@ -353,7 +355,7 @@ pub mod ping {
     pub struct PingResp {
         pub len: u16,
         pub status: Status,
-        pub msg: [u8; PING_LEN_MAX],
+        pub msg: [u8; PING_CMD_DATA_LEN_MAX],
     }
 
     impl PingResp {
@@ -362,12 +364,12 @@ pub mod ping {
         }
     }
 
-    impl From<Response<PING_LEN_MAX>> for PingResp {
-        fn from(resp: Response<PING_LEN_MAX>) -> Self {
+    impl From<Response<PING_RES_LEN_MAX>> for PingResp {
+        fn from(resp: Response<PING_RES_LEN_MAX>) -> Self {
             Self {
                 len: resp.len,
                 status: resp.status,
-                msg: resp.data,
+                msg: resp.data[..PING_CMD_DATA_LEN_MAX].try_into().unwrap(),
             }
         }
     }

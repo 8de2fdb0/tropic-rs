@@ -6,7 +6,7 @@ use x25519_dalek::StaticSecret;
 
 use crate::common::{self, PairingKeySlot, config::RegisterAddr};
 use crate::l1;
-use crate::l2;
+use crate::l2::{self, ReceiveResponse, info};
 use crate::l3;
 use crate::l3::session::EncSession;
 
@@ -108,9 +108,10 @@ where
         )?;
         self.spi_device.write(&req)?;
 
-        let resp: l2::Response<{ l2::info::GET_INFO_CHIP_INFO_ID_SIZE }> =
-            l1::receive(&mut self.spi_device, &mut self.delay)?.try_into()?;
-        Ok(resp.into())
+        Ok(l2::info::ChipId::receive(
+            &mut self.spi_device,
+            &mut self.delay,
+        )?)
     }
 
     pub fn get_firmware_version(
@@ -142,27 +143,20 @@ where
         )?;
         self.spi_device.write(&req)?;
 
-        let resp: l2::Response<{ l2::info::GET_INFO_FW_HEADER_SIZE }> =
-            l1::receive(&mut self.spi_device, &mut self.delay)?.try_into()?;
-
-        Ok(resp.try_into()?)
+        Ok(l2::info::FirmwareBootHeader::receive(
+            &mut self.spi_device,
+            &mut self.delay,
+        )?)
     }
 
     pub fn get_riscv_firmware_log(&mut self) -> Result<l2::log::GetLogResp, Error> {
         let req = l2::log::GetLogReq::create()?;
         self.spi_device.write(&req)?;
 
-        let resp: l2::Response<{ l2::log::GET_LOG_RSP_MAX_LEN }> =
-            l1::receive(&mut self.spi_device, &mut self.delay)?.try_into()?;
-        Ok(resp.into())
-    }
-
-    pub fn restart(&mut self, mode: l2::restart::RestartMode) -> Result<l2::Status, Error> {
-        let req = l2::restart::StartupReq::create(mode)?;
-        self.spi_device.write(&req)?;
-        let resp: l2::Response<{ l2::restart::STARTUP_RSP_LEN }> =
-            l1::receive(&mut self.spi_device, &mut self.delay)?.try_into()?;
-        Ok(resp.status)
+        Ok(l2::log::GetLogResp::receive(
+            &mut self.spi_device,
+            &mut self.delay,
+        )?)
     }
 
     pub fn get_cert_store<'a>(
@@ -178,6 +172,65 @@ where
         Ok(cert_store)
     }
 
+    pub fn sleep(&mut self, kind: l2::sleep::SleepKind) -> Result<l2::Status, Error> {
+        let req = l2::sleep::SleepReq::create(kind)?;
+        self.spi_device.write(&req)?;
+        Ok(l2::sleep::SleepResp::receive(&mut self.spi_device, &mut self.delay)?.status)
+    }
+
+    pub fn restart(&mut self, mode: l2::restart::RestartMode) -> Result<l2::Status, Error> {
+        let req = l2::restart::StartupReq::create(mode)?;
+        self.spi_device.write(&req)?;
+        Ok(l2::restart::StartupResp::receive(&mut self.spi_device, &mut self.delay)?.status)
+    }
+
+    pub fn resend_response<const N: usize, T>(&mut self) -> Result<T, Error>
+    where
+        T: ReceiveResponse<N>,
+        <T as core::convert::TryFrom<l2::Response<N>>>::Error: Into<l2::Error>,
+    {
+        let req = l2::resend::ResendReq::create()?;
+        self.spi_device.write(&req)?;
+        Ok(T::receive(&mut self.spi_device, &mut self.delay)?)
+    }
+
+    pub fn mutable_firmware_erase(
+        &mut self,
+        bank_id: info::BankId,
+    ) -> Result<l2::mutable_firmware::EraseResp, Error> {
+        let req = l2::mutable_firmware::EraseReq::create(bank_id)?;
+        self.spi_device.write(&req)?;
+
+        Ok(l2::mutable_firmware::EraseResp::receive(
+            &mut self.spi_device,
+            &mut self.delay,
+        )?)
+    }
+
+    #[cfg(feature = "acab")]
+    pub fn mutable_fiwrmware_update(
+        &mut self,
+        fw_update: &[u8],
+    ) -> Result<l2::mutable_firmware::acab::UpdateResp, Error> {
+        let req = l2::mutable_firmware::acab::UpdateReq::create(&fw_update)?;
+        self.spi_device.write(&req)?;
+
+        let mut resp =
+            l2::mutable_firmware::acab::UpdateResp::receive(&mut self.spi_device, &mut self.delay)?;
+
+        let req_chunks = l2::mutable_firmware::acab::UpdateDataReq::create(&fw_update)?;
+        for i in 0..req_chunks.count {
+            let next_req = req_chunks.chunks[i].command()?;
+            self.spi_device.write(&next_req)?;
+
+            resp = l2::mutable_firmware::acab::UpdateResp::receive(
+                &mut self.spi_device,
+                &mut self.delay,
+            )?;
+        }
+        Ok(resp)
+    }
+
     pub fn get_handshake<R: rand_core::RngCore + rand_core::CryptoRng>(
         &mut self,
         mut rng: R,
@@ -187,12 +240,10 @@ where
         let req = l2::handshake::HandshakeReq::create(eh_pubkey, pairing_key_slot)?;
         self.spi_device.write(&req)?;
 
-        let resp: l2::Response<{ l2::handshake::HANDSHAKE_RSP_LEN }> =
-            l1::receive(&mut self.spi_device, &mut self.delay)?.try_into()?;
-
-        let handshake_resp: l2::handshake::HandshakeResp = resp.into();
-
-        Ok((handshake_resp, eh_secret))
+        Ok((
+            l2::handshake::HandshakeResp::receive(&mut self.spi_device, &mut self.delay)?,
+            eh_secret,
+        ))
     }
 
     pub fn create_session<R: rand_core::RngCore + rand_core::CryptoRng>(
@@ -221,10 +272,10 @@ where
         let req = l2::enc_session::SessionAbortReq::create()?;
         self.spi_device.write(&req)?;
 
-        let resp: l2::Response<{ l2::enc_session::ENCRYPTED_SESSION_ABT_RSP_LEN }> =
-            l1::receive(&mut self.spi_device, &mut self.delay)?.try_into()?;
-
-        Ok(resp.status)
+        Ok(
+            l2::enc_session::SessionAbortResp::receive(&mut self.spi_device, &mut self.delay)?
+                .status,
+        )
     }
 
     pub fn ping(

@@ -2,16 +2,21 @@ mod common;
 
 use log::info;
 
-use tropic_rs::{common::PairingKeySlot, l2, l3::ping::PING_LEN_MAX};
+use rand::RngCore;
+use tropic_rs::{
+    common::PairingKeySlot,
+    l2,
+    l3::ping::{PING_CMD_DATA_LEN_MAX, PING_CMD_DATA_LEN_MIN},
+};
 
 use crate::common::*;
 
 const PING_MAX_LOOPS: usize = 200;
 
-fn rand_msg() -> Vec<u8> {
-    // should be max PING_MAX_LOOPS
-    let len = rand::random_range(0..PING_LEN_MAX);
-    vec![rand::random::<u8>(); len]
+fn rand_msg(len: usize) -> Vec<u8> {
+    let mut msg = vec![0_u8; len];
+    rand::rng().fill_bytes(&mut msg);
+    msg
 }
 
 #[test]
@@ -43,9 +48,19 @@ fn test_ping() {
         model_server.port().expect("failed to get port"),
     );
 
+    info!("Pinging... min boundary check with len: {PING_CMD_DATA_LEN_MIN}");
+    let ping = rand_msg(PING_CMD_DATA_LEN_MIN);
+    let pong = tropic_01.ping(&mut session, &ping).expect("Failed to ping");
+    assert_eq!(ping, pong.msg[..ping.len()]);
+
+    info!("Pinging... max boundary check with len: {PING_CMD_DATA_LEN_MAX}");
+    let ping = rand_msg(PING_CMD_DATA_LEN_MAX);
+    let pong = tropic_01.ping(&mut session, &ping).expect("Failed to ping");
+    assert_eq!(ping, pong.msg[..ping.len()]);
+
     info!("Will send {PING_MAX_LOOPS} Ping commands with random data of random length");
     for i in 0..PING_MAX_LOOPS {
-        let ping = rand_msg();
+        let ping = rand_msg(rand::random_range(0..PING_CMD_DATA_LEN_MAX));
         info!("Pinging... {i} with message_len {}", ping.len());
         let pong = tropic_01.ping(&mut session, &ping).expect("Failed to ping");
 

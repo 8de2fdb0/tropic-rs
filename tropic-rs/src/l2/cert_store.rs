@@ -15,7 +15,7 @@ pub(crate) const CERT_SIZE_SINGLE: usize = 700;
 pub(crate) const CERT_STORE_VERSION: u8 = 1;
 pub(crate) const NUM_CERTIFICATES: usize = 4;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     StoreVersion,
     NumCerts,
