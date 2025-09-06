@@ -26,7 +26,7 @@ const CHIP_MODE_ALARM_BIT: u8 = 0x02;
 /// This bit in CHIP_STATUS byte signalizes that chip is in STARTUP mode
 const CHIP_MODE_STARTUP_BIT: u8 = 0x04;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     Spi(embedded_hal::spi::ErrorKind),
     /// Chip is in ALARM
@@ -35,7 +35,8 @@ pub enum Error {
     ChipBusy,
     /// Data does not have an expected length
     InvalidDataLen,
-    TryFromSlice(core::array::TryFromSliceError),
+    /// Slice to error conversion failed
+    TryFromSlice,
 }
 
 #[cfg(feature = "display")]
@@ -46,16 +47,14 @@ impl core::fmt::Display for Error {
             Self::AlarmMode => f.write_str("chip is in alarm mode"),
             Self::ChipBusy => f.write_str("chip is busy"),
             Self::InvalidDataLen => f.write_str("invalid data length"),
-            Self::TryFromSlice(err) => {
-                f.write_fmt(format_args!("unable to convert slice: {}", err))
-            }
+            Self::TryFromSlice => f.write_fmt(format_args!("unable to convert slice to array")),
         }
     }
 }
 
 impl From<core::array::TryFromSliceError> for Error {
-    fn from(err: core::array::TryFromSliceError) -> Self {
-        Self::TryFromSlice(err)
+    fn from(_err: core::array::TryFromSliceError) -> Self {
+        Self::TryFromSlice
     }
 }
 

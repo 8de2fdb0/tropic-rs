@@ -8,7 +8,7 @@ const CRC16_INITIAL_VAL: u16 = 0x0000;
 // This is done after the 'Result reflected' step.
 const CRC16_FINAL_XOR_VALUE: u16 = 0x0000;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     CrcDataLen,
     CrcDataCap(usize, usize),

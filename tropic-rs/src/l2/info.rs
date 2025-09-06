@@ -408,10 +408,27 @@ impl From<Response<{ GET_INFO_CHIP_INFO_ID_SIZE }>> for ChipId {
     }
 }
 
-#[derive(Debug, Clone)]
+impl super::sealed::Sealed for ChipId {}
+
+impl super::ReceiveResponse<{ GET_INFO_CHIP_INFO_ID_SIZE }> for ChipId {}
+
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FirmwareType {
-    Riscv,
-    Spect,
+    Riscv = 1,
+    Spect = 2,
+}
+
+impl TryFrom<u8> for FirmwareType {
+    type Error = Error;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(FirmwareType::Riscv),
+            2 => Ok(FirmwareType::Spect),
+            _ => Err(Error::UnknownFirmwareType(value as u16)),
+        }
+    }
 }
 
 impl From<FirmwareType> for GetInfoObjectId {
@@ -532,3 +549,7 @@ impl TryFrom<Response<GET_INFO_FW_HEADER_SIZE>> for FirmwareBootHeader {
         }
     }
 }
+
+impl super::sealed::Sealed for FirmwareBootHeader {}
+
+impl super::ReceiveResponse<GET_INFO_FW_HEADER_SIZE> for FirmwareBootHeader {}
