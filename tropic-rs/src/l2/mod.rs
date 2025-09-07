@@ -962,7 +962,7 @@ pub mod mutable_firmware {
             #[test]
             fn test_create_update_req() {
                 let offset = 0;
-                let len = rand::random_range(0..UPDATE_REQ_DATA_LEN_MAX);
+                let len = rand::random_range(UPDATE_REQ_DATA_LEN_MIN..UPDATE_REQ_DATA_LEN_MAX);
                 let mut data = vec![0_u8; len];
                 rand::rng().fill_bytes(&mut data);
 
@@ -976,7 +976,7 @@ pub mod mutable_firmware {
                 assert_eq!(fw_update_req[5..data.len() + 5], data);
 
                 let offset = 22;
-                let len = rand::random_range(0..UPDATE_REQ_DATA_LEN_MAX);
+                let len = rand::random_range(UPDATE_REQ_DATA_LEN_MIN..UPDATE_REQ_DATA_LEN_MAX);
                 let mut data = vec![0_u8; len];
                 rand::rng().fill_bytes(&mut data);
 
