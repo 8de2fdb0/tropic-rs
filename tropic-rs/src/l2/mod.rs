@@ -21,8 +21,9 @@ pub(crate) const CMD_SIZE_LEN: usize = 1;
 // Lenght of the cmd crc field.
 pub(crate) const CMD_CRC_LEN: usize = 2;
 
-// TODO Maximal size of data field in one L2 transfer
+// Maximal size of data field in one L2 transfer
 pub(crate) const CHUNK_MAX_DATA_SIZE: usize = 252;
+
 // Maximal size of one l2 frame
 #[allow(unused)]
 pub(crate) const L2_MAX_FRAME_SIZE: usize =
@@ -244,12 +245,12 @@ mod sealed {
     pub trait Sealed {}
 }
 
-pub trait ReceiveResponse<const N: usize>: sealed::Sealed
+pub trait ReceiveResponseL2<const N: usize>: sealed::Sealed
 where
     Self: TryFrom<Response<N>>,
     <Self as TryFrom<Response<N>>>::Error: Into<Error>,
 {
-    fn receive<SPI: embedded_hal::spi::SpiDevice, D: embedded_hal::delay::DelayNs>(
+    fn receive_l2<SPI: embedded_hal::spi::SpiDevice, D: embedded_hal::delay::DelayNs>(
         spi_device: &mut SPI,
         delay: &mut D,
     ) -> Result<Self, Error> {
@@ -287,7 +288,7 @@ impl From<Response<{ STATUS_RSP_LEN }>> for StatusResp {
 
 impl sealed::Sealed for StatusResp {}
 
-impl ReceiveResponse<{ STATUS_RSP_LEN }> for StatusResp {}
+impl ReceiveResponseL2<STATUS_RSP_LEN> for StatusResp {}
 
 pub mod handshake {
     use super::*;
@@ -357,7 +358,7 @@ pub mod handshake {
 
     impl sealed::Sealed for HandshakeResp {}
 
-    impl ReceiveResponse<{ HANDSHAKE_RSP_LEN }> for HandshakeResp {}
+    impl ReceiveResponseL2<HANDSHAKE_RSP_LEN> for HandshakeResp {}
 }
 
 pub mod sleep {
@@ -372,7 +373,7 @@ pub mod sleep {
     #[repr(u8)]
     pub enum SleepKind {
         /// Regular Sleep Mode
-        Regular = 0x0f,
+        Regular = 0x05,
         /// Deep Sleep Mode
         Deep = 0x0a,
     }
@@ -390,8 +391,7 @@ pub mod sleep {
     pub type SleepResp = StatusResp;
 }
 
-// todo: think about renaming to reboot
-pub mod restart {
+pub mod startup {
     use super::*;
 
     const STARTUP_REQ_ID: u8 = 0xb3;
@@ -461,6 +461,7 @@ pub mod log {
         pub crc: [u8; 2],
     }
 
+    #[cfg(feature = "display")]
     impl core::fmt::Display for GetLogResp {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             let string_slice = &self.log_msg[..self.len as usize];
@@ -472,8 +473,8 @@ pub mod log {
         }
     }
 
-    impl From<Response<{ GET_LOG_RSP_MAX_LEN }>> for GetLogResp {
-        fn from(resp: Response<{ GET_LOG_RSP_MAX_LEN }>) -> Self {
+    impl From<Response<GET_LOG_RSP_MAX_LEN>> for GetLogResp {
+        fn from(resp: Response<GET_LOG_RSP_MAX_LEN>) -> Self {
             Self {
                 chip_status: resp.chip_status,
                 status: resp.status,
@@ -486,7 +487,7 @@ pub mod log {
 
     impl sealed::Sealed for GetLogResp {}
 
-    impl ReceiveResponse<{ GET_LOG_RSP_MAX_LEN }> for GetLogResp {}
+    impl ReceiveResponseL2<GET_LOG_RSP_MAX_LEN> for GetLogResp {}
 }
 
 pub mod enc_session {
@@ -503,7 +504,7 @@ pub mod enc_session {
 
     // Maximal length of field cmd_ciphertext
     #[allow(unused)]
-    const ENCRYPTED_CMD_REQ_CMD_CIPHERTEXT_LEN_MAX: usize = 4096;
+    const ENCRYPTED_CMD_REQ_CMD_CIPHERTEXT_LEN_MAX: usize = l3::PACKET_MAX_LEN;
 
     #[allow(unused)]
     const ENCRYPTED_CMD_RSP_LEN_MIN: usize = 19;
@@ -608,8 +609,8 @@ pub mod enc_session {
         pub crc: [u8; 2],
     }
 
-    impl From<Response<{ ENCRYPTED_RESP_LEN }>> for EncryptedCmdResp {
-        fn from(resp: Response<{ ENCRYPTED_RESP_LEN }>) -> Self {
+    impl From<Response<ENCRYPTED_RESP_LEN>> for EncryptedCmdResp {
+        fn from(resp: Response<ENCRYPTED_RESP_LEN>) -> Self {
             Self {
                 chip_status: resp.chip_status,
                 status: resp.status,

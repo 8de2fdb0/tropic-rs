@@ -1,4 +1,4 @@
-mod common;
+mod testing_common;
 
 use log::info;
 
@@ -7,52 +7,10 @@ use tropic_rs::{
     l3::EncSession,
 };
 
-use crate::common::*;
-
-fn random_config() -> config::Config {
-    config::Config {
-        bootloader: config::bootloader::Bootloader {
-            start_up: config::bootloader::StartUp::from_bits_retain(rand::random()),
-            sensor: config::bootloader::Sensor::from_bits_retain(rand::random()),
-            debug: config::bootloader::Debug::from_bits_retain(rand::random()),
-        },
-        application: config::application::Application {
-            gpo: config::application::Gpo::from_bits(rand::random()),
-            sleep_mode: config::application::SleepMode::from_bits_retain(rand::random()),
-        },
-        application_uap: config::application_uap::ApplicationUap {
-            pairing_key_write: config::application_uap::PairingKeyWrite::from_bits(rand::random()),
-            pairing_key_read: config::application_uap::PairingKeyRead::from_bits(rand::random()),
-            pairing_key_invalidate: config::application_uap::PairingKeyInvalidate::from_bits(
-                rand::random(),
-            ),
-            r_config_write_erase: config::application_uap::RConfigWriteErase::from_bits(
-                rand::random(),
-            ),
-            r_config_read: config::application_uap::RConfigRead::from_bits(rand::random()),
-            i_config_write: config::application_uap::IConfigWrite::from_bits(rand::random()),
-            i_config_read: config::application_uap::IConfigRead::from_bits(rand::random()),
-            ping: config::application_uap::Ping::from_bits(rand::random()),
-            r_mem_data_write: config::application_uap::RMemDataWrite::from_bits(rand::random()),
-            r_mem_data_read: config::application_uap::RMemDataRead::from_bits(rand::random()),
-            r_mem_data_erase: config::application_uap::RMemDataErase::from_bits(rand::random()),
-            random_value_get: config::application_uap::RandomValueGet::from_bits(rand::random()),
-            ecc_key_generate: config::application_uap::EccKeyGenerate::from_bits(rand::random()),
-            ecc_key_store: config::application_uap::EccKeyStore::from_bits(rand::random()),
-            ecc_key_read: config::application_uap::EccKeyRead::from_bits(rand::random()),
-            ecc_key_erase: config::application_uap::EccKeyErase::from_bits(rand::random()),
-            ecdsa_sign: config::application_uap::EcdsaSign::from_bits(rand::random()),
-            eddsa_sifn: config::application_uap::EddsaSign::from_bits(rand::random()),
-            mcounter_init: config::application_uap::McounterInit::from_bits(rand::random()),
-            mcounter_get: config::application_uap::McounterGet::from_bits(rand::random()),
-            mcounter_update: config::application_uap::McounterUpdate::from_bits(rand::random()),
-            mac_and_destroy: config::application_uap::MacAndDestroy::from_bits(rand::random()),
-        },
-    }
-}
+use crate::testing_common::*;
 
 fn cleanup<'a>(
-    tropic_01: &'a mut Tropic01Instance,
+    tropic_01: &'a mut Tropic01TestInstance,
     session: &'a mut EncSession,
     r_config_backup: config::Config,
 ) {
@@ -77,7 +35,7 @@ fn cleanup<'a>(
 }
 
 #[test]
-fn test_write_r_config() {
+fn test_l3_write_r_config() {
     setup_logging();
 
     info!("Creating randomized R config for testing");
@@ -95,7 +53,7 @@ fn test_write_r_config() {
 
     info!("Starting model server");
     let mut model_server = ModelServerBuilder::default()
-        .test_name("test_write_r_config")
+        .test_name("test_l3_write_r_config")
         .model_cfg(model_cfg.clone())
         .build()
         .expect("failed to build model server");
@@ -108,7 +66,7 @@ fn test_write_r_config() {
     );
 
     info!("Creating randomized R config for testing");
-    let r_config_random = random_config();
+    let r_config_random = testing_common::config::generate_random_config();
 
     info!("Backing up the whole R config:");
     let r_config_backup = tropic_01

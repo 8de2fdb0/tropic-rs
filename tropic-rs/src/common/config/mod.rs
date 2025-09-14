@@ -5,14 +5,27 @@ pub mod bootloader;
 
 use bitflag_attr::Flags;
 
-use crate::l3;
+use crate::l3::{self, ReceiveResponseL3};
 
+#[derive(Debug, PartialEq)]
 pub enum Error {
-    InvalidValue,
+    // InvalidValue,
+    IConfigBitIndexMax,
+}
+
+#[cfg(feature = "display")]
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            // Error::InvalidValue => write!(f, "Invalid value"),
+            Error::IConfigBitIndexMax => write!(f, "I config bit index bigger then 31"),
+        }
+    }
 }
 
 pub trait RegisterValue {
     fn from_u32(value: u32) -> Self;
+    fn to_u32(&self) -> u32;
     fn to_value(&self) -> [u8; 4];
 }
 
@@ -23,6 +36,9 @@ where
     fn from_u32(value: u32) -> Self {
         T::from_bits_retain(value)
     }
+    fn to_u32(&self) -> u32 {
+        self.bits()
+    }
     fn to_value(&self) -> [u8; 4] {
         self.bits().to_le_bytes()
     }
@@ -32,6 +48,37 @@ pub trait RegisterAddr {
     type Item: RegisterValue;
 
     fn register_addr(&self) -> [u8; 2];
+}
+
+const I_CONFIG_BIT_INDEX_MAX: u8 = 31;
+
+/// R memory user data slot
+#[derive(Debug, Clone, PartialEq)]
+pub struct IConfigBitIndex(u8);
+
+impl TryFrom<u8> for IConfigBitIndex {
+    type Error = Error;
+    fn try_from(index: u8) -> Result<Self, Self::Error> {
+        match index {
+            0..=I_CONFIG_BIT_INDEX_MAX => Ok(IConfigBitIndex(index)),
+            _ => Err(Error::IConfigBitIndexMax),
+        }
+    }
+}
+
+impl From<IConfigBitIndex> for u8 {
+    fn from(value: IConfigBitIndex) -> Self {
+        value.0
+    }
+}
+
+#[cfg(test)]
+impl IConfigBitIndex {
+    pub fn random() -> Self {
+        use rand::Rng;
+        let index: u8 = rand::rng().random_range(0..=I_CONFIG_BIT_INDEX_MAX);
+        IConfigBitIndex(index)
+    }
 }
 
 macro_rules! implement_register_addr_trait {
@@ -66,6 +113,9 @@ macro_rules! implement_register_traits_for_bitfield {
             fn from_u32(value: u32) -> Self {
                 Self::from_bits(value)
             }
+            fn to_u32(&self) -> u32 {
+                self.0
+            }
             fn to_value(&self) -> [u8; 4] {
                 self.0.to_le_bytes()
             }
@@ -82,6 +132,18 @@ pub struct Config {
     pub bootloader: bootloader::Bootloader,
     pub application: application::Application,
     pub application_uap: application_uap::ApplicationUap,
+}
+
+#[cfg(feature = "config-iter")]
+impl Config {
+    pub fn iter(&self) -> ConfigIter {
+        ConfigIter {
+            bootloader_config: self.bootloader.iter(),
+            application_config: self.application.iter(),
+            application_uap_config: self.application_uap.iter(),
+            index: 0,
+        }
+    }
 }
 
 #[cfg(feature = "display")]
@@ -110,6 +172,55 @@ impl core::fmt::Display for Config {
     }
 }
 
+#[cfg(feature = "config-iter")]
+pub struct Entry {
+    pub name: &'static str,
+    pub addr: [u8; 2],
+    pub value: u32,
+}
+
+#[cfg(feature = "config-iter")]
+pub struct ConfigIter {
+    bootloader_config: bootloader::BootloaderIter,
+    application_config: application::ApplicationIter,
+    application_uap_config: application_uap::ApplicationUapIter,
+    index: usize,
+}
+
+#[cfg(feature = "config-iter")]
+impl core::iter::Iterator for ConfigIter {
+    type Item = Entry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = match self.index {
+            0 => match self.bootloader_config.next() {
+                Some(entry) => Some(entry),
+                None => {
+                    self.index += 1;
+                    self.next()
+                }
+            },
+            1 => match self.application_config.next() {
+                Some(entry) => Some(entry),
+                None => {
+                    self.index += 1;
+                    self.next()
+                }
+            },
+            2 => match self.application_uap_config.next() {
+                Some(entry) => Some(entry),
+                None => {
+                    self.index += 1;
+                    self.next()
+                }
+            },
+            _ => None,
+        };
+        self.index += 1;
+        result
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub(crate) enum ConfigType {
     Reversable,
@@ -131,7 +242,7 @@ fn read_config_register<
         l3::send(
             spi_device,
             delay,
-            l3::reversable_config::ConfigReadCmd::create(addr),
+            l3::reversable_config::ConfigReadCmd::create(&addr),
             session,
         )?;
         let resp: l3::reversable_config::ConfigReadResp<R::Item> =
@@ -142,7 +253,7 @@ fn read_config_register<
         l3::send(
             spi_device,
             delay,
-            l3::irreversable_config::ConfigReadCmd::create(addr),
+            l3::irreversable_config::ConfigReadCmd::create(&addr),
             session,
         )?;
         let resp: l3::irreversable_config::ConfigReadResp<R::Item> =
@@ -395,7 +506,7 @@ pub(crate) fn read_whole_i_or_r_config<
     })
 }
 
-fn write_config_register<
+fn write_r_config_register<
     SPI: embedded_hal::spi::SpiDevice,
     D: embedded_hal::delay::DelayNs,
     R: RegisterAddr,
@@ -413,10 +524,7 @@ fn write_config_register<
         session,
     )?;
 
-    let resp: l3::reversable_config::ConfigWriteResp =
-        l3::receive(spi_device, delay, session)?.try_into()?;
-
-    Ok(resp)
+    l3::reversable_config::ConfigWriteResp::receive_l3(spi_device, delay, session)
 }
 
 pub(crate) fn write_whole_r_config<
@@ -428,189 +536,428 @@ pub(crate) fn write_whole_r_config<
     session: &mut impl l3::Session,
     config: &Config,
 ) -> Result<l3::reversable_config::ConfigWriteResp, l3::Error> {
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         bootloader::StartUpRegAddr,
         config.bootloader.start_up,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         bootloader::SensorRegAddr,
         config.bootloader.sensor,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         bootloader::DebugRegAddr,
         config.bootloader.debug,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application::GpoRegAddr,
         config.application.gpo,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application::SleepModeRegAddr,
         config.application.sleep_mode,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::PairingKeyWriteRegAddr,
         config.application_uap.pairing_key_write,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::PairingKeyReadRegAddr,
         config.application_uap.pairing_key_read,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::PairingKeyInvalidateRegAddr,
         config.application_uap.pairing_key_invalidate,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::RConfigWriteEraseRegAddr,
         config.application_uap.r_config_write_erase,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::RConfigReadRegAddr,
         config.application_uap.r_config_read,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::IConfigWriteRegAddr,
         config.application_uap.i_config_write,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::IConfigReadRegAddr,
         config.application_uap.i_config_read,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::PingRegAddr,
         config.application_uap.ping,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::RMemDataWriteRegAddr,
         config.application_uap.r_mem_data_write,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::RMemDataReadRegAddr,
         config.application_uap.r_mem_data_read,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::RMemDataEraseRegAddr,
         config.application_uap.r_mem_data_erase,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::RandomValueGetRegAddr,
         config.application_uap.random_value_get,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::EccKeyGenerateRegAddr,
         config.application_uap.ecc_key_generate,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::EccKeyStoreRegAddr,
         config.application_uap.ecc_key_store,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::EccKeyReadRegAddr,
         config.application_uap.ecc_key_read,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::EccKeyEraseRegAddr,
         config.application_uap.ecc_key_erase,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::EcdsaSignRegAddr,
         config.application_uap.ecdsa_sign,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::EddsaSignRegAddr,
         config.application_uap.eddsa_sifn,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::McounterInitRegAddr,
         config.application_uap.mcounter_init,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::McounterGetRegAddr,
         config.application_uap.mcounter_get,
     )?;
-    let _ = write_config_register(
+    let _ = write_r_config_register(
         spi_device,
         delay,
         session,
         application_uap::McounterUpdateRegAddr,
         config.application_uap.mcounter_update,
     )?;
-    let last_resp = write_config_register(
+    let last_resp = write_r_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::MacAndDestroyRegAddr,
+        config.application_uap.mac_and_destroy,
+    )?;
+
+    Ok(last_resp)
+}
+
+fn write_i_config_register<
+    SPI: embedded_hal::spi::SpiDevice,
+    D: embedded_hal::delay::DelayNs,
+    R: RegisterAddr,
+>(
+    spi_device: &mut SPI,
+    delay: &mut D,
+    session: &mut impl l3::Session,
+    addr: R,
+    value: R::Item,
+) -> Result<Option<l3::irreversable_config::ConfigWriteResp>, l3::Error> {
+    let value_u32 = value.to_u32();
+    let mut last_resp = None;
+
+    // Check that value is either 0 or 1 for each bit
+    for bit_index in 0_u8..32 {
+        let bit_value = ((value_u32 >> bit_index) & 0x01) as u8;
+        // if bit is 0 write it (all i_config bits are 1 by default)
+        if bit_value == 0 {
+            l3::send(
+                spi_device,
+                delay,
+                l3::irreversable_config::ConfigWriteCmd::create(
+                    &addr,
+                    bit_index.try_into().map_err(l3::Error::Config)?,
+                ),
+                session,
+            )?;
+
+            last_resp = Some(l3::irreversable_config::ConfigWriteResp::receive_l3(
+                spi_device, delay, session,
+            )?);
+        }
+    }
+    Ok(last_resp)
+}
+
+pub(crate) fn write_whole_i_config<
+    SPI: embedded_hal::spi::SpiDevice,
+    D: embedded_hal::delay::DelayNs,
+>(
+    spi_device: &mut SPI,
+    delay: &mut D,
+    session: &mut impl l3::Session,
+    config: &Config,
+) -> Result<Option<l3::irreversable_config::ConfigWriteResp>, l3::Error> {
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        bootloader::StartUpRegAddr,
+        config.bootloader.start_up,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        bootloader::SensorRegAddr,
+        config.bootloader.sensor,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        bootloader::DebugRegAddr,
+        config.bootloader.debug,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application::GpoRegAddr,
+        config.application.gpo,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application::SleepModeRegAddr,
+        config.application.sleep_mode,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::PairingKeyWriteRegAddr,
+        config.application_uap.pairing_key_write,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::PairingKeyReadRegAddr,
+        config.application_uap.pairing_key_read,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::PairingKeyInvalidateRegAddr,
+        config.application_uap.pairing_key_invalidate,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::RConfigWriteEraseRegAddr,
+        config.application_uap.r_config_write_erase,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::RConfigReadRegAddr,
+        config.application_uap.r_config_read,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::IConfigWriteRegAddr,
+        config.application_uap.i_config_write,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::IConfigReadRegAddr,
+        config.application_uap.i_config_read,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::PingRegAddr,
+        config.application_uap.ping,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::RMemDataWriteRegAddr,
+        config.application_uap.r_mem_data_write,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::RMemDataReadRegAddr,
+        config.application_uap.r_mem_data_read,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::RMemDataEraseRegAddr,
+        config.application_uap.r_mem_data_erase,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::RandomValueGetRegAddr,
+        config.application_uap.random_value_get,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::EccKeyGenerateRegAddr,
+        config.application_uap.ecc_key_generate,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::EccKeyStoreRegAddr,
+        config.application_uap.ecc_key_store,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::EccKeyReadRegAddr,
+        config.application_uap.ecc_key_read,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::EccKeyEraseRegAddr,
+        config.application_uap.ecc_key_erase,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::EcdsaSignRegAddr,
+        config.application_uap.ecdsa_sign,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::EddsaSignRegAddr,
+        config.application_uap.eddsa_sifn,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::McounterInitRegAddr,
+        config.application_uap.mcounter_init,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::McounterGetRegAddr,
+        config.application_uap.mcounter_get,
+    )?;
+    let _ = write_i_config_register(
+        spi_device,
+        delay,
+        session,
+        application_uap::McounterUpdateRegAddr,
+        config.application_uap.mcounter_update,
+    )?;
+    let last_resp = write_i_config_register(
         spi_device,
         delay,
         session,

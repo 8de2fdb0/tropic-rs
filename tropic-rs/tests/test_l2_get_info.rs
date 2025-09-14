@@ -1,9 +1,9 @@
-mod common;
+mod testing_common;
 
 use log::info;
 use tropic_rs::{cert_store, l2::info::FirmwareType};
 
-use crate::common::*;
+use crate::testing_common::*;
 
 const DEVICE_PUBKEY: [u8; 32] = [
     0x95, 0x08, 0xf0, 0x32, 0x1c, 0xb1, 0xd2, 0xe5, 0xd1, 0xf1, 0xa4, 0x60, 0x9c, 0x05, 0x41, 0xb7,
@@ -43,12 +43,12 @@ const ROOT_PUBKEY: [u8; 133] = [
 ];
 
 #[test]
-fn test_get_cert_store() {
+fn test_l2_get_cert_store() {
     setup_logging();
 
     info!("Starting model server");
     let mut model_server = ModelServerBuilder::default()
-        .test_name("test_get_cert_store")
+        .test_name("test_l2_get_cert_store")
         .build()
         .expect("failed to build model server");
     model_server.start_tcp();
@@ -129,12 +129,12 @@ pub fn find_pattern(haystack: &[u8; 128], needle: &[u8]) -> Option<(usize, usize
 }
 
 #[test]
-fn test_get_chip_id() {
+fn test_l2_get_chip_id() {
     setup_logging();
 
     info!("Starting model server");
     let mut model_server = ModelServerBuilder::default()
-        .test_name("test_get_chip_id")
+        .test_name("test_l2_get_chip_id")
         .build()
         .expect("failed to build model server");
     model_server.start_tcp();
@@ -207,12 +207,12 @@ const RISCV_FW_VERSION: [u8; 4] = *b"risc";
 const SPECT_FW_VERSION: [u8; 4] = *b"spec";
 
 #[test]
-fn test_firmware_versions() {
+fn test_l2_firmware_versions() {
     setup_logging();
 
     info!("Starting model server");
     let mut model_server = ModelServerBuilder::default()
-        .test_name("test_firmware_versions")
+        .test_name("test_l2_firmware_versions")
         .build()
         .expect("failed to build model server");
     model_server.start_tcp();

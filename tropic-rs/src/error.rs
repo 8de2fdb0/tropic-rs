@@ -1,9 +1,9 @@
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     InvalidCrc,
     CrcDataLen,
     CrcDataCap(usize, usize),
-    TryFromSlice(core::array::TryFromSliceError),
+    TryFromSlice,
     InvalidRespLen(usize, usize),
 
     AlarmMode,
@@ -18,9 +18,7 @@ impl core::fmt::Display for Error {
                 "insufficient data buffer capacity: expected {} bytes, got {}",
                 exp, act
             )),
-            Self::TryFromSlice(err) => {
-                f.write_fmt(format_args!("unable to convert slice: {}", err))
-            }
+            Self::TryFromSlice => f.write_fmt(format_args!("unable to convert slice")),
             Self::InvalidRespLen(exp, act) => f.write_fmt(format_args!(
                 "invalid response length: expected {} bytes, got {}",
                 exp, act
@@ -32,7 +30,7 @@ impl core::fmt::Display for Error {
 }
 
 impl From<core::array::TryFromSliceError> for Error {
-    fn from(err: core::array::TryFromSliceError) -> Self {
-        Self::TryFromSlice(err)
+    fn from(_err: core::array::TryFromSliceError) -> Self {
+        Self::TryFromSlice
     }
 }

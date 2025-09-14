@@ -25,6 +25,19 @@ pub enum Error {
     BadDecTag,
 }
 
+impl PartialEq for Error {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::NonceOverflow, Self::NonceOverflow) => true,
+            (Self::HkdfInvalidLength(_), Self::HkdfInvalidLength(_)) => true,
+            (Self::AesAead(_), Self::AesAead(_)) => true,
+            #[cfg(test)]
+            (Self::BadDecTag, Self::BadDecTag) => true,
+            _ => false,
+        }
+    }
+}
+
 #[cfg(feature = "display")]
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

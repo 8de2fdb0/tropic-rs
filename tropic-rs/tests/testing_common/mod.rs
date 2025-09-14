@@ -1,5 +1,6 @@
 #![allow(dead_code, unused_imports)]
 
+pub mod config;
 pub mod keys;
 pub mod mocks;
 pub mod tcp;
@@ -16,15 +17,19 @@ use std::sync::Once;
 use std::{env, mem};
 
 use log::info;
+use rand::RngCore;
 use x25519_dalek::StaticSecret;
 
 use tropic_cert_store::nom_decoder::NomDecoder;
-use tropic_rs::{Tropic01, cert_store, common, l3::EncSession};
+use tropic_rs::{
+    Tropic01, cert_store, common,
+    l3::{EncSession, session},
+};
 
 use mocks::delay::MockDelay;
 use tcp::{DEFAULT_TCP_ADDR, DEFAULT_TCP_PORT, TcpSpiDevice};
 
-pub type Tropic01Instance = Tropic01<TcpSpiDevice, MockDelay, NomDecoder>;
+pub type Tropic01TestInstance = Tropic01<TcpSpiDevice, MockDelay, NomDecoder>;
 
 static LOGGER_INIT: Once = Once::new();
 
@@ -39,17 +44,17 @@ pub fn setup_logging() {
     });
 }
 
-pub struct CleanupGuard<F: FnOnce(&mut Tropic01Instance, &mut EncSession)> {
-    tropic: Tropic01Instance,
+pub struct CleanupGuard<F: FnOnce(&mut Tropic01TestInstance, &mut EncSession)> {
+    tropic: Tropic01TestInstance,
     session: EncSession,
     cleanup_fn: Option<F>,
 }
 
 impl<F> CleanupGuard<F>
 where
-    F: FnOnce(&mut Tropic01Instance, &mut EncSession),
+    F: FnOnce(&mut Tropic01TestInstance, &mut EncSession),
 {
-    pub(crate) fn new(tropic: Tropic01Instance, session: EncSession, cleanup_fn: F) -> Self {
+    pub(crate) fn new(tropic: Tropic01TestInstance, session: EncSession, cleanup_fn: F) -> Self {
         Self {
             tropic,
             session,
@@ -57,7 +62,7 @@ where
         }
     }
 
-    pub fn run<F2: FnOnce(&mut Tropic01Instance, &mut EncSession)>(&mut self, f: F2) {
+    pub fn run<F2: FnOnce(&mut Tropic01TestInstance, &mut EncSession)>(&mut self, f: F2) {
         f(&mut self.tropic, &mut self.session);
     }
 
@@ -68,7 +73,7 @@ where
 
 impl<F> Drop for CleanupGuard<F>
 where
-    F: FnOnce(&mut Tropic01Instance, &mut EncSession),
+    F: FnOnce(&mut Tropic01TestInstance, &mut EncSession),
 {
     fn drop(&mut self) {
         if let Some(f) = mem::take(&mut self.cleanup_fn) {
@@ -77,7 +82,7 @@ where
     }
 }
 
-pub fn get_tropic_test_instance(port: u16) -> Tropic01Instance {
+pub fn get_tropic_test_instance(port: u16) -> Tropic01TestInstance {
     info!("creating tropic test instance, connected to model server");
     let spi_device =
         TcpSpiDevice::connect(DEFAULT_TCP_ADDR, port).expect("failed to connect to model server");
@@ -85,17 +90,15 @@ pub fn get_tropic_test_instance(port: u16) -> Tropic01Instance {
     Tropic01::<_, _, NomDecoder>::new(spi_device, MockDelay)
 }
 
-pub fn get_tropic_test_instance_with_session(
+pub fn get_tropic_test_session(
+    tropic_01: &mut Tropic01TestInstance,
     sh_secret: StaticSecret,
     pairing_key_slot: common::PairingKeySlot,
-    port: u16,
-) -> (Tropic01Instance, EncSession) {
+) -> EncSession {
     info!(
         "creating secure session with pairing_key_slot: {:?}",
         pairing_key_slot
     );
-
-    let mut tropic_01 = get_tropic_test_instance(port);
 
     let mut cert_buffer = [0u8; cert_store::CERT_BUFFER_LEN];
 
@@ -112,5 +115,27 @@ pub fn get_tropic_test_instance_with_session(
         .create_session(rng, &sh_secret, pairing_key_slot, &st_pubkey)
         .expect("msg failed to create session");
 
+    session
+}
+
+pub fn get_tropic_test_instance_with_session(
+    sh_secret: StaticSecret,
+    pairing_key_slot: common::PairingKeySlot,
+    port: u16,
+) -> (Tropic01TestInstance, EncSession) {
+    info!(
+        "creating secure session with pairing_key_slot: {:?}",
+        pairing_key_slot
+    );
+
+    let mut tropic_01 = get_tropic_test_instance(port);
+    let session = get_tropic_test_session(&mut tropic_01, sh_secret, pairing_key_slot);
+
     (tropic_01, session)
+}
+
+pub fn rand_bytes(len: usize) -> Vec<u8> {
+    let mut msg = vec![0_u8; len];
+    rand::rng().fill_bytes(&mut msg);
+    msg
 }

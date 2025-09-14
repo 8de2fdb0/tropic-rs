@@ -5,7 +5,7 @@ use core::default;
 use bitfields::bitfield;
 use bitflag_attr::bitflag;
 
-use super::{implement_register_addr_trait, implement_register_traits_for_bitfield};
+use super::*;
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
@@ -54,6 +54,16 @@ pub struct Application {
     pub sleep_mode: SleepMode,
 }
 
+#[cfg(feature = "config-iter")]
+impl Application {
+    pub fn iter(&self) -> ApplicationIter {
+        ApplicationIter {
+            bootloader: *self,
+            index: 0,
+        }
+    }
+}
+
 #[cfg(feature = "display")]
 impl core::fmt::Display for Application {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -71,6 +81,35 @@ impl core::fmt::Display for Application {
                 self.gpo, self.sleep_mode
             ))
         }
+    }
+}
+
+#[cfg(feature = "config-iter")]
+pub struct ApplicationIter {
+    bootloader: Application,
+    index: u8,
+}
+
+#[cfg(feature = "config-iter")]
+impl Iterator for ApplicationIter {
+    type Item = Entry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = match self.index {
+            0 => Some(Entry {
+                name: "Gpo",
+                addr: GpoRegAddr {}.register_addr(),
+                value: self.bootloader.gpo.into_bits(),
+            }),
+            1 => Some(Entry {
+                name: "SleepMode",
+                addr: SleepModeRegAddr {}.register_addr(),
+                value: self.bootloader.sleep_mode.bits(),
+            }),
+            _ => None,
+        };
+        self.index += 1;
+        next
     }
 }
 
