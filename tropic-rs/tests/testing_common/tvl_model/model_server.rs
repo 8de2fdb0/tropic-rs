@@ -11,7 +11,7 @@ use log::{debug, error, info, warn};
 use tempfile::NamedTempFile;
 use wait_timeout::ChildExt;
 
-use crate::common::{LogLevel, LoggingCfg, ModelCfg, ModelCfgBuilder};
+use crate::testing_common::{LogLevel, LoggingCfg, ModelCfg, ModelCfgBuilder};
 
 fn get_ephemeral_listener() -> Result<(TcpListener, u16), Error> {
     let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0);

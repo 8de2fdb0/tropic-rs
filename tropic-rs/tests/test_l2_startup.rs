@@ -1,17 +1,17 @@
-mod common;
+mod testing_common;
 
 use log::info;
 use tropic_rs::{l1, l2};
 
-use crate::common::*;
+use crate::testing_common::*;
 
 #[test]
-fn test_reboot() {
+fn test_l2_startup() {
     setup_logging();
 
     info!("Starting model server");
     let mut model_server = ModelServerBuilder::default()
-        .test_name("test_reboot")
+        .test_name("test_l2_startup")
         .build()
         .expect("failed to build model server");
     model_server.start_tcp();
@@ -26,7 +26,7 @@ fn test_reboot() {
 
     info!("Rebooting to the normal mode...");
     tropic_01
-        .restart(l2::restart::RestartMode::Reboot)
+        .restart(l2::startup::RestartMode::Reboot)
         .expect("failed to reboot");
 
     info!("Checking we are again in the normal mode...");
@@ -39,7 +39,7 @@ fn test_reboot() {
     for _ in 0..2 {
         info!("Rebooting to the bootloader mode (maintenance reboot)...");
         tropic_01
-            .restart(l2::restart::RestartMode::Maintanance)
+            .restart(l2::startup::RestartMode::Maintanance)
             .expect("failed to reboot");
         info!("Checking we are in the bootloader mode...");
 
@@ -58,7 +58,7 @@ fn test_reboot() {
 
     info!("Rebooting to the normal mode...");
     tropic_01
-        .restart(l2::restart::RestartMode::Reboot)
+        .restart(l2::startup::RestartMode::Reboot)
         .expect("failed to reboot");
 
     info!("Checking we are again in the normal mode...");

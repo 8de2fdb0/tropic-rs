@@ -1,13 +1,13 @@
-mod common;
+mod testing_common;
 
 use log::info;
 
 use tropic_rs::common::{PairingKeySlot, config::Config};
 
-use crate::common::*;
+use crate::testing_common::*;
 
 #[test]
-fn test_read_r_config() {
+fn test_l3_read_r_config() {
     setup_logging();
 
     info!("Creating randomized R config for testing");
@@ -24,7 +24,7 @@ fn test_read_r_config() {
 
     info!("Starting model server");
     let mut model_server = ModelServerBuilder::default()
-        .test_name("test_read_i_config")
+        .test_name("test_l3_read_r_config")
         .model_cfg(model_cfg.clone())
         .build()
         .expect("failed to build model server");
@@ -52,7 +52,7 @@ fn test_read_r_config() {
 }
 
 #[test]
-fn test_read_i_config() {
+fn test_l3_read_i_config() {
     setup_logging();
 
     info!("Creating randomized R config for testing");
@@ -69,7 +69,7 @@ fn test_read_i_config() {
 
     info!("Starting model server");
     let mut model_server = ModelServerBuilder::default()
-        .test_name("test_read_i_config")
+        .test_name("test_l3_read_i_config")
         .model_cfg(model_cfg.clone())
         .build()
         .expect("failed to build model server");
