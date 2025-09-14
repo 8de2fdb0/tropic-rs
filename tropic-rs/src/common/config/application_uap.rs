@@ -2,9 +2,8 @@
 
 use bitfields::bitfield;
 
-use super::{
-    access_flag::AccessFlag, implement_register_addr_trait, implement_register_traits_for_bitfield,
-};
+use super::access_flag::AccessFlag;
+use super::*;
 
 const DEFAULT_ACCESS_FLAG: AccessFlag = AccessFlag::from_bits(0b11110000);
 
@@ -773,6 +772,16 @@ pub struct ApplicationUap {
     pub mac_and_destroy: MacAndDestroy,
 }
 
+#[cfg(feature = "config-iter")]
+impl ApplicationUap {
+    pub fn iter(&self) -> ApplicationUapIter {
+        ApplicationUapIter {
+            index: 0,
+            uap: *self,
+        }
+    }
+}
+
 #[cfg(feature = "display")]
 impl core::fmt::Display for ApplicationUap {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -826,6 +835,135 @@ impl core::fmt::Display for ApplicationUap {
                 self.mcounter_update,
                 self.mac_and_destroy,))
         }
+    }
+}
+
+#[cfg(feature = "config-iter")]
+pub struct ApplicationUapIter {
+    index: usize,
+    uap: ApplicationUap,
+}
+
+#[cfg(feature = "config-iter")]
+impl core::iter::Iterator for ApplicationUapIter {
+    type Item = Entry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = match self.index {
+            0 => Some(Entry {
+                name: "PairingKeyWrite",
+                addr: PairingKeyWriteRegAddr {}.register_addr(),
+                value: self.uap.pairing_key_write.into_bits(),
+            }),
+            1 => Some(Entry {
+                name: "PairingKeyRead",
+                addr: PairingKeyReadRegAddr {}.register_addr(),
+                value: self.uap.pairing_key_read.into_bits(),
+            }),
+            2 => Some(Entry {
+                name: "PairingKeyInvalidate",
+                addr: PairingKeyInvalidateRegAddr {}.register_addr(),
+                value: self.uap.pairing_key_invalidate.into_bits(),
+            }),
+            3 => Some(Entry {
+                name: "RConfigWriteErase",
+                addr: RConfigWriteEraseRegAddr {}.register_addr(),
+                value: self.uap.r_config_write_erase.into_bits(),
+            }),
+            4 => Some(Entry {
+                name: "RConfigRead",
+                addr: RConfigReadRegAddr {}.register_addr(),
+                value: self.uap.r_config_read.into_bits(),
+            }),
+            5 => Some(Entry {
+                name: "IConfigWrite",
+                addr: IConfigWriteRegAddr {}.register_addr(),
+                value: self.uap.i_config_write.into_bits(),
+            }),
+            6 => Some(Entry {
+                name: "IConfigRead",
+                addr: IConfigReadRegAddr {}.register_addr(),
+                value: self.uap.i_config_read.into_bits(),
+            }),
+            7 => Some(Entry {
+                name: "Ping",
+                addr: PingRegAddr {}.register_addr(),
+                value: self.uap.ping.into_bits(),
+            }),
+            8 => Some(Entry {
+                name: "RMemDataWrite",
+                addr: RMemDataWriteRegAddr {}.register_addr(),
+                value: self.uap.r_mem_data_write.into_bits(),
+            }),
+            9 => Some(Entry {
+                name: "RMemDataRead",
+                addr: RMemDataReadRegAddr {}.register_addr(),
+                value: self.uap.r_mem_data_read.into_bits(),
+            }),
+            10 => Some(Entry {
+                name: "RMemDataErase",
+                addr: RMemDataEraseRegAddr {}.register_addr(),
+                value: self.uap.r_mem_data_erase.into_bits(),
+            }),
+            11 => Some(Entry {
+                name: "RandomValueGet",
+                addr: RandomValueGetRegAddr {}.register_addr(),
+                value: self.uap.random_value_get.into_bits(),
+            }),
+            12 => Some(Entry {
+                name: "EccKeyGenerate",
+                addr: EccKeyGenerateRegAddr {}.register_addr(),
+                value: self.uap.ecc_key_generate.into_bits(),
+            }),
+            13 => Some(Entry {
+                name: "EccKeyStore",
+                addr: EccKeyStoreRegAddr {}.register_addr(),
+                value: self.uap.ecc_key_store.into_bits(),
+            }),
+            14 => Some(Entry {
+                name: "EccKeyRead",
+                addr: EccKeyReadRegAddr {}.register_addr(),
+                value: self.uap.ecc_key_read.into_bits(),
+            }),
+            15 => Some(Entry {
+                name: "EccKeyErase",
+                addr: EccKeyEraseRegAddr {}.register_addr(),
+                value: self.uap.ecc_key_erase.into_bits(),
+            }),
+            16 => Some(Entry {
+                name: "EcdsaSign",
+                addr: EcdsaSignRegAddr {}.register_addr(),
+                value: self.uap.ecdsa_sign.into_bits(),
+            }),
+            17 => Some(Entry {
+                name: "EddsaSign",
+                addr: EddsaSignRegAddr {}.register_addr(),
+                value: self.uap.eddsa_sifn.into_bits(),
+            }),
+            18 => Some(Entry {
+                name: "McounterInit",
+                addr: McounterInitRegAddr {}.register_addr(),
+                value: self.uap.mcounter_init.into_bits(),
+            }),
+            19 => Some(Entry {
+                name: "McounterGet",
+                addr: McounterGetRegAddr {}.register_addr(),
+                value: self.uap.mcounter_get.into_bits(),
+            }),
+            20 => Some(Entry {
+                name: "McounterUpdate",
+                addr: McounterUpdateRegAddr {}.register_addr(),
+                value: self.uap.mcounter_update.into_bits(),
+            }),
+            21 => Some(Entry {
+                name: "MacAndDestroy",
+                addr: MacAndDestroyRegAddr {}.register_addr(),
+                value: self.uap.mac_and_destroy.into_bits(),
+            }),
+            _ => return None,
+        };
+        self.index += 1;
+        next
     }
 }
 

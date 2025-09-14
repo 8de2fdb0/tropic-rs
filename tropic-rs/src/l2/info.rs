@@ -329,6 +329,7 @@ impl From<[u8; 20]> for ProvisioningData {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct ChipId {
     /// CHIP_ID structure versioning (32 bits), defined by Tropic Square in BP.
     pub chip_id_ver: [u8; 4], //  [0x01_u8, 0x02, 0x03, 0x04];
@@ -410,7 +411,7 @@ impl From<Response<{ GET_INFO_CHIP_INFO_ID_SIZE }>> for ChipId {
 
 impl super::sealed::Sealed for ChipId {}
 
-impl super::ReceiveResponse<{ GET_INFO_CHIP_INFO_ID_SIZE }> for ChipId {}
+impl super::ReceiveResponseL2<{ GET_INFO_CHIP_INFO_ID_SIZE }> for ChipId {}
 
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq)]
@@ -552,4 +553,4 @@ impl TryFrom<Response<GET_INFO_FW_HEADER_SIZE>> for FirmwareBootHeader {
 
 impl super::sealed::Sealed for FirmwareBootHeader {}
 
-impl super::ReceiveResponse<GET_INFO_FW_HEADER_SIZE> for FirmwareBootHeader {}
+impl super::ReceiveResponseL2<GET_INFO_FW_HEADER_SIZE> for FirmwareBootHeader {}

@@ -2,15 +2,16 @@ use core::fmt::Debug;
 use core::marker::PhantomData;
 
 use embedded_hal::spi::SpiDevice;
+use sha2::Digest as _;
 use x25519_dalek::StaticSecret;
 
 use crate::common::{self, PairingKeySlot, config::RegisterAddr};
 use crate::l1;
-use crate::l2::{self, ReceiveResponse, info};
-use crate::l3;
+use crate::l2::{self, ReceiveResponseL2, info};
 use crate::l3::session::EncSession;
+use crate::l3::{self, ReceiveResponseL3};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     Spi(embedded_hal::spi::ErrorKind),
     L1(crate::l1::Error),
@@ -108,7 +109,7 @@ where
         )?;
         self.spi_device.write(&req)?;
 
-        Ok(l2::info::ChipId::receive(
+        Ok(l2::info::ChipId::receive_l2(
             &mut self.spi_device,
             &mut self.delay,
         )?)
@@ -143,7 +144,7 @@ where
         )?;
         self.spi_device.write(&req)?;
 
-        Ok(l2::info::FirmwareBootHeader::receive(
+        Ok(l2::info::FirmwareBootHeader::receive_l2(
             &mut self.spi_device,
             &mut self.delay,
         )?)
@@ -153,7 +154,7 @@ where
         let req = l2::log::GetLogReq::create()?;
         self.spi_device.write(&req)?;
 
-        Ok(l2::log::GetLogResp::receive(
+        Ok(l2::log::GetLogResp::receive_l2(
             &mut self.spi_device,
             &mut self.delay,
         )?)
@@ -175,23 +176,23 @@ where
     pub fn sleep(&mut self, kind: l2::sleep::SleepKind) -> Result<l2::Status, Error> {
         let req = l2::sleep::SleepReq::create(kind)?;
         self.spi_device.write(&req)?;
-        Ok(l2::sleep::SleepResp::receive(&mut self.spi_device, &mut self.delay)?.status)
+        Ok(l2::sleep::SleepResp::receive_l2(&mut self.spi_device, &mut self.delay)?.status)
     }
 
-    pub fn restart(&mut self, mode: l2::restart::RestartMode) -> Result<l2::Status, Error> {
-        let req = l2::restart::StartupReq::create(mode)?;
+    pub fn restart(&mut self, mode: l2::startup::RestartMode) -> Result<l2::Status, Error> {
+        let req = l2::startup::StartupReq::create(mode)?;
         self.spi_device.write(&req)?;
-        Ok(l2::restart::StartupResp::receive(&mut self.spi_device, &mut self.delay)?.status)
+        Ok(l2::startup::StartupResp::receive_l2(&mut self.spi_device, &mut self.delay)?.status)
     }
 
     pub fn resend_response<const N: usize, T>(&mut self) -> Result<T, Error>
     where
-        T: ReceiveResponse<N>,
+        T: ReceiveResponseL2<N>,
         <T as core::convert::TryFrom<l2::Response<N>>>::Error: Into<l2::Error>,
     {
         let req = l2::resend::ResendReq::create()?;
         self.spi_device.write(&req)?;
-        Ok(T::receive(&mut self.spi_device, &mut self.delay)?)
+        Ok(T::receive_l2(&mut self.spi_device, &mut self.delay)?)
     }
 
     pub fn mutable_firmware_erase(
@@ -201,7 +202,7 @@ where
         let req = l2::mutable_firmware::EraseReq::create(bank_id)?;
         self.spi_device.write(&req)?;
 
-        Ok(l2::mutable_firmware::EraseResp::receive(
+        Ok(l2::mutable_firmware::EraseResp::receive_l2(
             &mut self.spi_device,
             &mut self.delay,
         )?)
@@ -215,15 +216,17 @@ where
         let req = l2::mutable_firmware::acab::UpdateReq::create(&fw_update)?;
         self.spi_device.write(&req)?;
 
-        let mut resp =
-            l2::mutable_firmware::acab::UpdateResp::receive(&mut self.spi_device, &mut self.delay)?;
+        let mut resp = l2::mutable_firmware::acab::UpdateResp::receive_l2(
+            &mut self.spi_device,
+            &mut self.delay,
+        )?;
 
         let req_chunks = l2::mutable_firmware::acab::UpdateDataReq::create(&fw_update)?;
         for i in 0..req_chunks.count {
             let next_req = req_chunks.chunks[i].command()?;
             self.spi_device.write(&next_req)?;
 
-            resp = l2::mutable_firmware::acab::UpdateResp::receive(
+            resp = l2::mutable_firmware::acab::UpdateResp::receive_l2(
                 &mut self.spi_device,
                 &mut self.delay,
             )?;
@@ -241,7 +244,7 @@ where
         self.spi_device.write(&req)?;
 
         Ok((
-            l2::handshake::HandshakeResp::receive(&mut self.spi_device, &mut self.delay)?,
+            l2::handshake::HandshakeResp::receive_l2(&mut self.spi_device, &mut self.delay)?,
             eh_secret,
         ))
     }
@@ -273,7 +276,7 @@ where
         self.spi_device.write(&req)?;
 
         Ok(
-            l2::enc_session::SessionAbortResp::receive(&mut self.spi_device, &mut self.delay)?
+            l2::enc_session::SessionAbortResp::receive_l2(&mut self.spi_device, &mut self.delay)?
                 .status,
         )
     }
@@ -321,8 +324,11 @@ where
             session,
         )?;
 
-        let resp = l3::receive(&mut self.spi_device, &mut self.delay, session)?.into();
-        Ok(resp)
+        Ok(l3::payring_key::PairingKeyWriteResp::receive_l3(
+            &mut self.spi_device,
+            &mut self.delay,
+            session,
+        )?)
     }
 
     pub fn pairing_key_invalidate(
@@ -337,13 +343,17 @@ where
             session,
         )?;
 
-        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+        Ok(l3::payring_key::PairingKeyInvalidateResp::receive_l3(
+            &mut self.spi_device,
+            &mut self.delay,
+            session,
+        )?)
     }
 
     pub fn r_config_read_value<R: RegisterAddr>(
         &mut self,
         session: &mut EncSession,
-        addr: R,
+        addr: &R,
     ) -> Result<l3::reversable_config::ConfigReadResp<R::Item>, Error> {
         l3::send(
             &mut self.spi_device,
@@ -367,7 +377,7 @@ where
             session,
         )?;
 
-        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.try_into()?)
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
     }
 
     pub fn r_config_read(
@@ -394,7 +404,7 @@ where
             session,
         )?;
 
-        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.try_into()?)
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
     }
 
     pub fn r_config_write(
@@ -402,13 +412,28 @@ where
         session: &mut EncSession,
         config: &common::config::Config,
     ) -> Result<l3::reversable_config::ConfigWriteResp, Error> {
-        let resp: l3::reversable_config::ConfigWriteResp = common::config::write_whole_r_config(
+        let resp = common::config::write_whole_r_config(
             &mut self.spi_device,
             &mut self.delay,
             session,
             config,
         )?;
         Ok(resp)
+    }
+
+    pub fn i_config_read_value<R: RegisterAddr>(
+        &mut self,
+        session: &mut EncSession,
+        addr: &R,
+    ) -> Result<l3::irreversable_config::ConfigReadResp<R::Item>, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::irreversable_config::ConfigReadCmd::create(addr),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.try_into()?)
     }
 
     pub fn i_config_read(
@@ -422,6 +447,276 @@ where
             common::config::ConfigType::Irreverasable,
         )?;
         Ok(whole_r_config)
+    }
+
+    pub fn i_config_write_bit_index<R: RegisterAddr>(
+        &mut self,
+        session: &mut EncSession,
+        addr: &R,
+        bit_index: common::config::IConfigBitIndex,
+    ) -> Result<l3::irreversable_config::ConfigWriteResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::irreversable_config::ConfigWriteCmd::create(addr, bit_index),
+            session,
+        )?;
+
+        Ok(l3::irreversable_config::ConfigWriteResp::receive_l3(
+            &mut self.spi_device,
+            &mut self.delay,
+            session,
+        )?)
+    }
+
+    pub fn i_config_write(
+        &mut self,
+        session: &mut EncSession,
+        config: &common::config::Config,
+    ) -> Result<Option<l3::irreversable_config::ConfigWriteResp>, Error> {
+        let resp = common::config::write_whole_i_config(
+            &mut self.spi_device,
+            &mut self.delay,
+            session,
+            config,
+        )?;
+        Ok(resp)
+    }
+
+    pub fn r_mem_data_read(
+        &mut self,
+        session: &mut EncSession,
+        slot: common::UserDataSlot,
+    ) -> Result<l3::r_mem_data::RMemDataReadResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::r_mem_data::RMemDataReadCmd::create(slot),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.try_into()?)
+    }
+
+    pub fn r_mem_data_erase(
+        &mut self,
+        session: &mut EncSession,
+        slot: common::UserDataSlot,
+    ) -> Result<l3::r_mem_data::RMemDataEraseResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::r_mem_data::RMemDataEraseCmd::create(slot),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+    }
+
+    pub fn r_mem_data_write(
+        &mut self,
+        session: &mut EncSession,
+        slot: common::UserDataSlot,
+        data: &[u8],
+    ) -> Result<l3::r_mem_data::RMemDataWriteResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::r_mem_data::RMemDataWriteCmd::create(slot, data)?,
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+    }
+
+    pub fn random_value(
+        &mut self,
+        session: &mut EncSession,
+        n_bytes: u8,
+    ) -> Result<l3::random::RandomValueGetResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::random::RandomValueGetCmd::create(n_bytes)?,
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+    }
+
+    pub fn ecc_key_generate(
+        &mut self,
+        session: &mut EncSession,
+        ecc_key_slot: common::ecc::EccKeySlot,
+        curve: common::ecc::EccCurve,
+    ) -> Result<l3::ecc_key::EccKeyGenerateResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::ecc_key::EccKeyGenerateCmd::create(ecc_key_slot, curve),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+    }
+
+    pub fn ecc_key_store(
+        &mut self,
+        session: &mut EncSession,
+        ecc_key_slot: common::ecc::EccKeySlot,
+        curve: common::ecc::EccCurve,
+        // TODO: add a feature that uses rust crypto traits
+        //  - use ed25519-dalek-fiat or ed25519-dalek for ed25519 key verification
+        //  - use p256 for p256 key verification
+        secret_key: &[u8; l3::CMD_SECRET_KEY_LEN],
+    ) -> Result<l3::ecc_key::EccKeyStoreResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::ecc_key::EccKeyStoreCmd::create(ecc_key_slot, curve, secret_key),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+    }
+
+    pub fn ecc_key_read_pubkey(
+        &mut self,
+        session: &mut EncSession,
+        ecc_key_slot: common::ecc::EccKeySlot,
+    ) -> Result<l3::ecc_key::EccKeyReadResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::ecc_key::EccKeyReadCmd::create(ecc_key_slot),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.try_into()?)
+    }
+
+    pub fn ecc_key_erase(
+        &mut self,
+        session: &mut EncSession,
+        ecc_key_slot: common::ecc::EccKeySlot,
+    ) -> Result<l3::ecc_key::EccKeyEraseResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::ecc_key::EccKeyEraseCmd::create(ecc_key_slot),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+    }
+
+    pub fn ecc_ecdsa_sign(
+        &mut self,
+        session: &mut EncSession,
+        ecc_key_slot: common::ecc::EccKeySlot,
+        message: &[u8],
+    ) -> Result<l3::ecc_sign::EcdsaSignResp, Error> {
+        let hash = sha2::Sha256::digest(message).into();
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::ecc_sign::EcdsaSignCmd::create(ecc_key_slot, &hash),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+    }
+
+    pub fn ecc_eddsa_sign(
+        &mut self,
+        session: &mut EncSession,
+        ecc_key_slot: common::ecc::EccKeySlot,
+        message: &[u8],
+    ) -> Result<l3::ecc_sign::EddsaSignResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::ecc_sign::EddsaSignCmd::create(ecc_key_slot, message)?,
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+    }
+
+    pub fn mcounter_init(
+        &mut self,
+        session: &mut EncSession,
+        index: common::MCounterIndex,
+        value: u32,
+    ) -> Result<l3::mcounter::MCounterInitResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::mcounter::MCounterInitCmd::create(index, value),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+    }
+
+    pub fn mcounter_update(
+        &mut self,
+        session: &mut EncSession,
+        index: common::MCounterIndex,
+    ) -> Result<l3::mcounter::MCounterUpdateResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::mcounter::MCounterUpdateCmd::create(index),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+    }
+
+    pub fn mcounter_get(
+        &mut self,
+        session: &mut EncSession,
+        index: common::MCounterIndex,
+    ) -> Result<l3::mcounter::MCounterGetResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::mcounter::MCounterGetCmd::create(index),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+    }
+
+    pub fn mac_and_destroy(
+        &mut self,
+        session: &mut EncSession,
+        slot: &common::MacAndDestroySlot,
+        data_in: &[u8; 32],
+    ) -> Result<l3::mac_and_destroy::MacAndDestroyResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::mac_and_destroy::MacAndDestroyCmd::create(slot, data_in),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
+    }
+
+    pub fn serial_code_get(
+        &mut self,
+        session: &mut EncSession,
+    ) -> Result<l3::serial_code::GetSerialCodeResp, Error> {
+        l3::send(
+            &mut self.spi_device,
+            &mut self.delay,
+            l3::serial_code::GetSerialCodeCmd::create(),
+            session,
+        )?;
+
+        Ok(l3::receive(&mut self.spi_device, &mut self.delay, session)?.into())
     }
 }
 

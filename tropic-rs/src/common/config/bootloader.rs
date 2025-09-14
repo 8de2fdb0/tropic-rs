@@ -168,6 +168,16 @@ pub struct Bootloader {
     pub debug: Debug,
 }
 
+#[cfg(feature = "config-iter")]
+impl Bootloader {
+    pub fn iter(&self) -> BootloaderIter {
+        BootloaderIter {
+            bootloader: *self,
+            index: 0,
+        }
+    }
+}
+
 #[cfg(feature = "display")]
 impl core::fmt::Display for Bootloader {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -183,6 +193,39 @@ impl core::fmt::Display for Bootloader {
                 self.start_up, self.sensor, self.debug
             ))
         }
+    }
+}
+
+#[cfg(feature = "config-iter")]
+pub struct BootloaderIter {
+    bootloader: Bootloader,
+    index: u8,
+}
+
+#[cfg(feature = "config-iter")]
+impl core::iter::Iterator for BootloaderIter {
+    type Item = super::Entry;
+    fn next(&mut self) -> Option<Self::Item> {
+        let entry = match self.index {
+            0 => Some(Entry {
+                name: "StartUp",
+                addr: SensorRegAddr {}.register_addr(),
+                value: self.bootloader.start_up.bits(),
+            }),
+            1 => Some(Entry {
+                name: "Sensor",
+                addr: StartUpRegAddr {}.register_addr(),
+                value: self.bootloader.sensor.bits(),
+            }),
+            2 => Some(Entry {
+                name: "Debug",
+                addr: DebugRegAddr {}.register_addr(),
+                value: self.bootloader.debug.bits(),
+            }),
+            _ => None,
+        };
+        self.index += 1;
+        entry
     }
 }
 
