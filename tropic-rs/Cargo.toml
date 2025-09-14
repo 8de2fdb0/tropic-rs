@@ -15,7 +15,7 @@ rand_core_compat = { version = "0.1", default-features = false, features = [
 x25519-dalek = { version = "2.0", default-features = false, features = [
     "static_secrets",
 ] }
-ed25519-dalek = { version = "2", default-features = false }
+# ed25519-dalek = { version = "2", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 hkdf = { version = "0.12", default-features = false }
 hmac = { version = "0.12", default-features = false }
@@ -38,9 +38,13 @@ serde = { "version" = "1", features = ["derive"] }
 serde_yaml = "0.9"
 tempfile = "3.21"
 derive_builder = "0.20"
+
+p256 = { version = "0.13", features = ["ecdsa"] }
+ed25519-dalek-fiat = "0.1"
+
 tropic-cert-store = { path = "../tropic-cert-store", default-features = false, features = [
     "nom-decoder",
-] }
+] } # ecdsa = "0.16"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
@@ -52,3 +56,4 @@ display = []
 defmt = ["dep:defmt"]
 abab = []
 acab = []
+config-iter = []
