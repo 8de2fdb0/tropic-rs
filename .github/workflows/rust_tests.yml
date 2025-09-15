@@ -6,12 +6,8 @@ name: Rust CI
 on:
   push:
     branches: [ "main" ]
-    paths:
-      - tropic-rs/**
   pull_request:
     branches: [ "main" ]
-    paths:
-      - tropic-rs/**
 
 # Environment variables available to all jobs
 env:
