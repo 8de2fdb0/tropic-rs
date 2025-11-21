@@ -204,7 +204,7 @@ pub struct BitString<'a> {
 }
 
 /// Parse a BIT STRING and return its contents (excluding tag/length)
-fn parse_bit_string_contents(input: &[u8]) -> IResult<&[u8], BitString> {
+fn parse_bit_string_contents(input: &[u8]) -> IResult<&[u8], BitString<'_>> {
     let (input, tag) = be_u8(input)?;
     if tag != TAG_BIT_STRING {
         return Err(nom::Err::Error(nom::error::Error::new(

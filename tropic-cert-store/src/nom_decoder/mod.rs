@@ -1,5 +1,10 @@
 pub mod nom_parser;
 
+#[cfg(feature = "serde")]
+use base64ct::{Base64, Encoding};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use tropic_rs::cert_store::{CertDecoder, CertKind, Certificate, ErrorType, SubjectPubkey};
 
 #[non_exhaustive]
@@ -45,10 +50,77 @@ impl<'a> From<nom_parser::Error<'a>> for Error<'a> {
     }
 }
 
+#[cfg(feature = "serde")]
+fn serialize_cert<S>(cert: &nom_parser::Certificate, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use base64ct::{Base64, Encoding};
+    use tropic_rs::cert_store::CERT_SIZE_SINGLE;
+
+    let mut buf = [0u8; CERT_SIZE_SINGLE * 4 / 3 + 4]; // base64 size
+
+    let b64_str = Base64::encode(cert.raw_der, &mut buf)
+        .map_err(|_| serde::ser::Error::custom("cert too large"))?;
+
+    serializer.serialize_str(&b64_str)
+}
+
+#[cfg(feature = "serde")]
+fn deserialize_cert<'de, D>(deserializer: D) -> Result<nom_parser::Certificate<'de>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct CertVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for CertVisitor {
+        type Value = nom_parser::Certificate<'de>;
+
+        fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+            formatter.write_str("a base64 encoded string representing a DER-encoded certificate")
+        }
+
+        fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            let der_bytes = unsafe {
+                let bytes_mut: &mut [u8] =
+                    core::slice::from_raw_parts_mut(v.as_ptr() as *mut u8, v.len());
+                Base64::decode_in_place(bytes_mut).map_err(E::custom)?
+            };
+
+            nom_parser::extract_x509_certificate_parts(der_bytes)
+                .map_err(|_| E::custom("invalid X.509 certificate"))
+        }
+    }
+
+    deserializer.deserialize_bytes(CertVisitor)
+}
+
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(bound(deserialize = "'de: 'a")))]
 pub struct NomCertificate<'a> {
     kind: CertKind,
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            serialize_with = "serialize_cert",
+            deserialize_with = "deserialize_cert",
+            borrow
+        )
+    )]
     cert: nom_parser::Certificate<'a>,
+}
+
+impl NomCertificate<'_> {
+    pub fn kind(&self) -> &CertKind {
+        &self.kind
+    }
+    pub fn raw_der(&self) -> &[u8] {
+        self.cert.raw_der
+    }
 }
 
 impl<'a> ErrorType for NomCertificate<'a> {

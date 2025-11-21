@@ -1,4 +1,6 @@
 use embedded_hal::spi::Error as _;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// TODO Maximal size of data field in one L2 transfer
 const L2_CHUNK_MAX_DATA_SIZE: usize = 252;
@@ -27,45 +29,14 @@ const CHIP_MODE_ALARM_BIT: u8 = 0x02;
 const CHIP_MODE_STARTUP_BIT: u8 = 0x04;
 
 #[derive(Debug, PartialEq)]
-pub enum Error {
-    Spi(embedded_hal::spi::ErrorKind),
-    /// Chip is in ALARM
-    AlarmMode,
-    /// Chip is BUSY - typically chip is still booting
-    ChipBusy,
-    /// Data does not have an expected length
-    InvalidDataLen,
-    /// Slice to error conversion failed
-    TryFromSlice,
-}
-
-#[cfg(feature = "display")]
-impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Spi(err) => f.write_fmt(format_args!("spi error: {}", err)),
-            Self::AlarmMode => f.write_str("chip is in alarm mode"),
-            Self::ChipBusy => f.write_str("chip is busy"),
-            Self::InvalidDataLen => f.write_str("invalid data length"),
-            Self::TryFromSlice => f.write_fmt(format_args!("unable to convert slice to array")),
-        }
-    }
-}
-
-impl From<core::array::TryFromSliceError> for Error {
-    fn from(_err: core::array::TryFromSliceError) -> Self {
-        Self::TryFromSlice
-    }
-}
-
-#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize, Default))]
 pub struct ChipStatus {
     /// The chip is ready to accept requests
-    ready: bool,
+    pub ready: bool,
     /// The chip is in ALARM mode
-    alarm: bool,
+    pub alarm: bool,
     /// The chip is in STARTUP mode
-    start: bool,
+    pub start: bool,
 }
 
 impl ChipStatus {
@@ -94,12 +65,12 @@ pub enum ChipMode {
     Application,
 }
 
-pub(crate) struct Response<const N: usize> {
-    pub(crate) chip_status: ChipStatus,
-    pub(crate) status: u8,
-    pub(crate) len: u8,
-    pub(crate) data: [u8; N],
-    pub(crate) crc: [u8; 2],
+pub struct Response<const N: usize> {
+    pub chip_status: ChipStatus,
+    pub status: u8,
+    pub len: u8,
+    pub data: [u8; N],
+    pub crc: [u8; 2],
 }
 
 pub(crate) fn receive<
@@ -109,7 +80,7 @@ pub(crate) fn receive<
 >(
     spi_device: &mut SPI,
     delay: &mut D,
-) -> Result<Response<N>, Error> {
+) -> Result<Response<N>, crate::transport::Error> {
     let mut retry = READ_MAX_TRIES;
 
     let req = [GET_RESPONSE_REQ_ID];
@@ -138,12 +109,12 @@ pub(crate) fn receive<
 
         spi_device
             .transaction(&mut operations)
-            .map_err(|e| Error::Spi(e.kind()))?;
+            .map_err(|e| crate::transport::Error::Spi(e.kind()))?;
 
         let chip_status: ChipStatus = chip_status[0].into();
 
         if chip_status.alarm {
-            return Err(Error::AlarmMode);
+            return Err(crate::transport::Error::AlarmMode);
         }
 
         if chip_status.ready {
@@ -165,7 +136,7 @@ pub(crate) fn receive<
                     254 => [data[254], crc[1]],
                     // crc is already correct
                     255 => crc,
-                    _ => return Err(Error::InvalidDataLen),
+                    _ => return Err(crate::transport::Error::InvalidDataLen),
                 };
             }
 
@@ -189,7 +160,7 @@ pub(crate) fn receive<
             }
         }
     }
-    Err(Error::ChipBusy)
+    Err(crate::transport::Error::ChipBusy)
 }
 
 #[cfg(test)]

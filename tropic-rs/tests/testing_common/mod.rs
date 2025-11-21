@@ -24,12 +24,13 @@ use tropic_cert_store::nom_decoder::NomDecoder;
 use tropic_rs::{
     Tropic01, cert_store, common,
     l3::{EncSession, session},
+    transport::SpiDeviceTransport,
 };
 
 use mocks::delay::MockDelay;
 use tcp::{DEFAULT_TCP_ADDR, DEFAULT_TCP_PORT, TcpSpiDevice};
 
-pub type Tropic01TestInstance = Tropic01<TcpSpiDevice, MockDelay, NomDecoder>;
+pub type Tropic01TestInstance = Tropic01<SpiDeviceTransport<TcpSpiDevice, MockDelay>, NomDecoder>;
 
 static LOGGER_INIT: Once = Once::new();
 
@@ -87,7 +88,9 @@ pub fn get_tropic_test_instance(port: u16) -> Tropic01TestInstance {
     let spi_device =
         TcpSpiDevice::connect(DEFAULT_TCP_ADDR, port).expect("failed to connect to model server");
 
-    Tropic01::<_, _, NomDecoder>::new(spi_device, MockDelay)
+    let transport = SpiDeviceTransport::new(spi_device, MockDelay);
+
+    Tropic01::<_, NomDecoder>::new(transport)
 }
 
 pub fn get_tropic_test_session(
@@ -111,11 +114,9 @@ pub fn get_tropic_test_session(
         .expect("failed to get device pubkey");
 
     let rng = rand::rng();
-    let session = tropic_01
+    tropic_01
         .create_session(rng, &sh_secret, pairing_key_slot, &st_pubkey)
-        .expect("msg failed to create session");
-
-    session
+        .expect("msg failed to create session")
 }
 
 pub fn get_tropic_test_instance_with_session(

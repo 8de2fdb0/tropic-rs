@@ -1,16 +1,15 @@
-// use der::Decode;
-
-// use super::x509_parser;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
     cert_store::{Certificate, Error as _},
-    l1,
     l2::{self, info},
+    transport,
 };
 
 /// Maximal size of TROPIC01's certificate
 pub(crate) const _CERT_SIZE_TOTAL: usize = 3840;
-pub(crate) const CERT_SIZE_SINGLE: usize = 700;
+pub const CERT_SIZE_SINGLE: usize = 700;
 
 pub(crate) const CERT_STORE_VERSION: u8 = 1;
 pub(crate) const NUM_CERTIFICATES: usize = 4;
@@ -20,7 +19,7 @@ pub enum Error {
     StoreVersion,
     NumCerts,
     CertSize,
-    L1(l1::Error),
+    Transport(transport::Error),
     NotEnoughData,
     BufferTooSmall,
     CertNotFound,
@@ -36,7 +35,7 @@ impl core::fmt::Display for Error {
             Self::StoreVersion => f.write_str("invalid cert store version"),
             Self::NumCerts => f.write_str("invalid number of certificates"),
             Self::CertSize => f.write_str("invalid certificate size"),
-            Self::L1(err) => f.write_fmt(format_args!("l1 error: {}", err)),
+            Self::Transport(e) => f.write_fmt(format_args!("transport error: {}", e)),
             Self::NotEnoughData => f.write_str("not enough data"),
             Self::BufferTooSmall => f.write_str("provided certificate buffer is too small"),
             Self::CertNotFound => f.write_str("certificate not found"),
@@ -59,15 +58,10 @@ const CERT_STORE_RSP_LEN: usize = 128; // same as GET_INFO_BLOCK_LEN
 /// Recommended size of certificate buffer.
 pub const CERT_BUFFER_LEN: usize = 10 * CERT_SIZE_SINGLE;
 
-// #[derive(Debug)]
-// pub struct Certificate<'a> {
-//     pub kind: CertKind,
-//     pub cert: x509_parser::Certificate<'a>,
-// }
-
 // The struct to hold the parsed certificates in a no_std friendly way.
 // This assumes a maximum of 10 certificates.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CertStore<C> {
     pub version: u8,
     pub num_certs: u8,
@@ -117,12 +111,10 @@ where
 
 pub(crate) fn request_cert_store<
     'a,
-    SPI: embedded_hal::spi::SpiDevice,
-    D: embedded_hal::delay::DelayNs,
+    T: crate::transport::TropicTransport,
     C: crate::cert_store::CertDecoder,
 >(
-    spi_device: &mut SPI,
-    delay: &mut D,
+    transport: &mut T,
     certificate_buffer: &'a mut [u8],
 ) -> Result<CertStore<C::Cert<'a>>, l2::Error> {
     // 1. Parse the header from the first packet (p0).
@@ -131,9 +123,7 @@ pub(crate) fn request_cert_store<
         info::BlocIndex::CertStore(0),
     )?;
 
-    spi_device.write(&req)?;
-    let l2_resp: l2::Response<{ CERT_STORE_RSP_LEN }> =
-        l1::receive(spi_device, delay)?.try_into()?;
+    let l2_resp: l2::Response<{ CERT_STORE_RSP_LEN }> = transport.request(&req)?.try_into()?;
 
     let l2_get_info_resp: l2::info::GetInfoResp<{ CERT_STORE_RSP_LEN }> = l2_resp.into();
     let p0 = l2_get_info_resp.object;
@@ -177,9 +167,9 @@ pub(crate) fn request_cert_store<
             info::BlocIndex::CertStore(i as u8),
         )?;
 
-        spi_device.write(&req)?;
-        let l2_resp: l2::Response<{ CERT_STORE_RSP_LEN }> = l1::receive(spi_device, delay)
-            .map_err(|e| l2::Error::CertStore(Error::L1(e)))?
+        let l2_resp: l2::Response<{ CERT_STORE_RSP_LEN }> = transport
+            .request(&req)
+            .map_err(|e| l2::Error::CertStore(Error::Transport(e)))?
             .try_into()?;
 
         let l2_get_info_resp: l2::info::GetInfoResp<{ CERT_STORE_RSP_LEN }> = l2_resp.into();

@@ -5,6 +5,8 @@ use aes_gcm::{
 use hmac::Mac;
 use rand_core::{CryptoRng, RngCore};
 use rand_core_compat::Rng09;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -141,6 +143,7 @@ fn tropic_hkdf(
 }
 
 #[derive(Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 struct TropicNonce {
     value: [u8; 12],
 }
@@ -157,6 +160,7 @@ impl TropicNonce {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EncSession {
     nonce_cmd: TropicNonce,
     nonce_res: TropicNonce,

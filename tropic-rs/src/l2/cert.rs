@@ -1,5 +1,8 @@
 use core::fmt::Debug;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// Cert error.
 pub trait Error: Debug {
     /// Convert error to a generic Certificate error kind.
@@ -71,6 +74,7 @@ impl<T: ErrorType + ?Sized> ErrorType for &mut T {
 
 #[derive(Debug, PartialEq)]
 #[repr(u8)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CertKind {
     Device = 0,
     Xxxxx = 1,

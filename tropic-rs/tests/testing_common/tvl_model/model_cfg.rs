@@ -195,7 +195,7 @@ impl From<RIConfig> for TropciConfig {
                 ecdsa_sign: application_uap::EcdsaSign::from_bits(
                     cfg.cfg_uap_ecdsa_sign.unwrap_or_default(),
                 ),
-                eddsa_sifn: application_uap::EddsaSign::from_bits(
+                eddsa_sign: application_uap::EddsaSign::from_bits(
                     cfg.cfg_uap_eddsa_sign.unwrap_or_default(),
                 ),
                 mcounter_init: application_uap::McounterInit::from_bits(
