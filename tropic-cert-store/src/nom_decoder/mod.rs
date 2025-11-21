@@ -63,7 +63,11 @@ where
     let b64_str = Base64::encode(cert.raw_der, &mut buf)
         .map_err(|_| serde::ser::Error::custom("cert too large"))?;
 
+<<<<<<< HEAD
     serializer.serialize_str(b64_str)
+=======
+    serializer.serialize_str(&b64_str)
+>>>>>>> e1c7a00 (feature: usb dongle transport)
 }
 
 #[cfg(feature = "serde")]
