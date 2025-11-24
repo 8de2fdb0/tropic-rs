@@ -63,7 +63,7 @@ where
     let b64_str = Base64::encode(cert.raw_der, &mut buf)
         .map_err(|_| serde::ser::Error::custom("cert too large"))?;
 
-    serializer.serialize_str(&b64_str)
+    serializer.serialize_str(b64_str)
 }
 
 #[cfg(feature = "serde")]

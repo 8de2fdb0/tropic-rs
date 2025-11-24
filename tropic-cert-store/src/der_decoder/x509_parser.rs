@@ -187,7 +187,7 @@ mod core_fmt {
                         write!(f, "{:02x}", byte)?;
                     }
                     if i < self.value.len() / self.block {
-                        write!(f, ":\n")?;
+                        writeln!(f, ":")?;
                     }
                 }
             } else {
