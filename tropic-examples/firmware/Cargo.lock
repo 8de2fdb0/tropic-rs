@@ -96,22 +96,15 @@ checksum = "2d7e60934ceec538daadb9d8432424ed043a904d8e0243f3c6446bce549a46ac"
 
 [[package]]
 name = "bitfields"
-<<<<<<< HEAD
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d866f92dc1574aa8da443eacb06ad8fbe4056dbc1b7c3aae508cbccd46c7e706"
-=======
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f7b84260234ecc8ba5a13cac862569913ee84281f108e6520121de0d50ac4db"
->>>>>>> e1c7a00 (feature: usb dongle transport)
 dependencies = [
  "bitfields-impl",
 ]
 
 [[package]]
 name = "bitfields-impl"
-<<<<<<< HEAD
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c09459e6af3016ea58af8332e31d5da117d33a621bad7019355eefccc4a567d4"
@@ -119,15 +112,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.111",
-=======
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e80ed89419086de767177cc00f0a9af47c9b34646c7c6d2203cd04b2a15c672a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
  "thiserror",
 ]
 
@@ -160,11 +144,7 @@ checksum = "f9408e7caa43581f3524b6000ec834503651cfac9a543b0663d3c1634d368944"
 dependencies = [
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -264,11 +244,7 @@ checksum = "e37549a379a9e0e6e576fd208ee60394ccb8be963889eebba3ffe0980364f472"
 dependencies = [
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -327,11 +303,7 @@ checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
 dependencies = [
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -355,11 +327,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -370,11 +338,7 @@ checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
 dependencies = [
  "darling_core",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -406,11 +370,7 @@ dependencies = [
  "proc-macro-error2",
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -469,11 +429,7 @@ dependencies = [
  "darling",
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -613,11 +569,7 @@ checksum = "a0b4095fc99e1d858e5b8c7125d2638372ec85aa0fe6c807105cf10b0265ca6c"
 dependencies = [
  "frunk_proc_macro_helpers",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -629,11 +581,7 @@ dependencies = [
  "frunk_core",
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -1019,11 +967,7 @@ checksum = "e0232bd009a197ceec9cc881ba46f727fcd8060a2d8d6a9dde7a69030a6fe2bb"
 dependencies = [
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -1064,11 +1008,7 @@ dependencies = [
  "proc-macro-error-attr2",
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -1082,15 +1022,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-<<<<<<< HEAD
 version = "1.0.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a338cc41d27e6cc6dce6cefc13a0729dfbb81c262b1f519331575dd80ef3067f"
-=======
-version = "1.0.41"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce25767e7b499d1b604768e7cde645d14cc8584231ea6b295e9c9eb22c02e1d1"
->>>>>>> e1c7a00 (feature: usb dongle transport)
 dependencies = [
  "proc-macro2",
 ]
@@ -1199,11 +1133,7 @@ checksum = "30f19a85fe107b65031e0ba8ec60c34c2494069fe910d6c297f5e7cb5a6f76d0"
 dependencies = [
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -1267,11 +1197,7 @@ checksum = "74edd7a5979e9763bbb98e9746e711bac7464ee3397af7288e6c288ff0d3c764"
 dependencies = [
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -1326,11 +1252,7 @@ dependencies = [
  "proc-macro-error2",
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -1457,11 +1379,7 @@ checksum = "5b0276cf7f2c73365f7157c8123c21cd9a50fbbd844757af28ca1f5925fc2a00"
 dependencies = [
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -1542,15 +1460,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-<<<<<<< HEAD
 version = "2.0.111"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "390cc9a294ab71bdb1aa2e99d13be9c753cd2d7bd6560c77118597410c4d2e87"
-=======
-version = "2.0.108"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da58917d35242480a05c2897064da0a80589a2a0476c9a3f2fdc83b53502e917"
->>>>>>> e1c7a00 (feature: usb dongle transport)
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1574,11 +1486,7 @@ checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
 dependencies = [
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -1870,11 +1778,7 @@ checksum = "a47fddd13af08290e67f4acabf4b459f647552718f683a7b415d290ac744a836"
 dependencies = [
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -1885,11 +1789,7 @@ checksum = "bd9211b69f8dcdfa817bfd14bf1c97c9188afa36f4750130fcdf3f400eca9fa8"
 dependencies = [
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
 
 [[package]]
@@ -1962,9 +1862,5 @@ checksum = "9ecf5b4cc5364572d7f4c329661bcc82724222973f2cab6f050a4e5c22f75181"
 dependencies = [
  "proc-macro2",
  "quote",
-<<<<<<< HEAD
  "syn 2.0.111",
-=======
- "syn 2.0.108",
->>>>>>> e1c7a00 (feature: usb dongle transport)
 ]
