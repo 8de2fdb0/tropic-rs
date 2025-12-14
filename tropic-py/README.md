@@ -1,0 +1,223 @@
+# tropic-py
+
+Python bindings for TROPIC01 secure element via USB dongle transport.
+
+This package provides a Python interface to the TROPIC01 secure element using the USB dongle transport implementation from `tropic-rs`. It is compatible with both CPython and MicroPython.
+
+## Features
+
+- **USB Dongle Transport**: Communicate with TROPIC01 via USB serial interface
+- **Full API Access**: All TROPIC01 methods exposed through Python
+- **CPython Compatible**: Works with Python 3.7+
+- **MicroPython Compatible**: Can be compiled for MicroPython platforms
+- **Type-Safe**: Built on top of the Rust `tropic-rs` crate using PyO3
+
+## Installation
+
+### CPython (Standard Python)
+
+```bash
+# Install maturin for building
+pip install maturin
+
+# Build and install in development mode
+cd tropic-py
+maturin develop --release
+
+# Or build a wheel
+maturin build --release
+pip install target/wheels/tropic_py-*.whl
+```
+
+### MicroPython
+
+MicroPython support requires compiling the native module for your specific platform. See the MicroPython documentation for details on building native modules.
+
+## Usage
+
+### Basic Example
+
+```python
+from tropic_py import Tropic01
+import json
+
+# Connect to device
+tropic = Tropic01("/dev/ttyACM0", baud_rate=115200)
+
+# Get chip status
+status = tropic.get_chip_status()
+print(f"Chip ready: {status['ready']}")
+
+# Get chip ID
+chip_id_json = tropic.get_chip_id()
+chip_id = json.loads(chip_id_json)
+print(json.dumps(chip_id, indent=2))
+
+# Get firmware version
+fw_version = tropic.get_firmware_version("Riscv")
+print(f"Version: {fw_version}")
+```
+
+### Session Management
+
+```python
+from tropic_py import Tropic01
+
+tropic = Tropic01("/dev/ttyACM0")
+
+# Get handshake for session
+handshake = tropic.get_handshake(pairing_key_slot=0)
+print(handshake)
+
+# Abort session when done
+tropic.abort_session()
+```
+
+## API Reference
+
+### Tropic01 Class
+
+#### Constructor
+
+```python
+Tropic01(port: str, baud_rate: int = 115200)
+```
+
+Create a new TROPIC01 instance connected via USB dongle.
+
+**Parameters:**
+- `port`: Serial port path (e.g., "/dev/ttyACM0" on Linux, "COM3" on Windows)
+- `baud_rate`: Serial baud rate (default: 115200)
+
+#### Methods
+
+##### Device Information
+
+- `get_chip_status()` - Get chip status (ready, alarm, chip_mode)
+- `get_chip_id()` - Get chip ID as JSON string
+- `get_firmware_version(fw_type: str)` - Get firmware version ("Riscv" or "Spect") as hex string
+- `get_firmware_boot_header(bank_id: int)` - Get boot header for bank (1, 2, 17, or 18)
+- `get_riscv_firmware_log()` - Get RISC-V firmware log
+- `get_cert_store()` - Get certificate store as JSON string
+
+##### Power Management
+
+- `sleep(kind: str)` - Put device to sleep ("Regular" or "Deep")
+- `restart(mode: str)` - Restart device ("Reboot" or "Maintanance")
+
+##### Session Management
+
+- `get_handshake(pairing_key_slot: int)` - Get handshake for session (slot 0-3)
+- `abort_session()` - Abort current session
+
+## Examples
+
+See the `examples/` directory for complete examples:
+
+- `basic_usage.py` - Basic device information retrieval
+- `session_management.py` - Session handshake and management
+- `micropython_example.py` - MicroPython-compatible example
+
+## Requirements
+
+### CPython
+- Python 3.7 or later
+- Rust toolchain (for building)
+- maturin (for building)
+
+### MicroPython
+- MicroPython 1.19 or later
+- Cross-compilation toolchain for target platform
+
+## Platform Support
+
+### Tested Platforms
+- Linux (x86_64, ARM)
+- macOS (x86_64, ARM64)
+- Windows (x86_64)
+
+### Serial Port Notes
+- **Linux**: Usually `/dev/ttyACM0` or `/dev/ttyUSB0`
+- **macOS**: Usually `/dev/tty.usbmodem*`
+- **Windows**: Usually `COM3`, `COM4`, etc.
+
+Make sure your user has permission to access the serial port:
+```bash
+# Linux: Add user to dialout group
+sudo usermod -a -G dialout $USER
+# Log out and log back in for changes to take effect
+```
+
+## Development
+
+### Building
+
+```bash
+# Development build
+maturin develop
+
+# Release build
+maturin build --release
+```
+
+### Testing
+
+```bash
+# Run examples (requires connected TROPIC01 device)
+python examples/basic_usage.py
+python examples/session_management.py
+```
+
+## Implementation Details
+
+This package wraps the Rust `tropic-rs` crate using PyO3, providing:
+
+1. **Serial Transport**: Direct implementation of the USB dongle serial protocol
+2. **TropicTransport Trait**: Implements the standard transport interface
+3. **High-Level API**: Wraps all `Tropic01` methods from the Rust crate
+4. **Error Handling**: Converts Rust errors to Python exceptions
+5. **Data Serialization**: Returns complex data structures as JSON strings
+
+The implementation is based on the USB dongle transport from:
+`tropic-examples/usb_dongle/src/serial_transport.rs`
+
+## License
+
+Licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](../LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](../LICENSE-MIT))
+
+at your option.
+
+## Contributing
+
+Contributions are welcome! Please ensure:
+1. Code compiles without warnings
+2. Examples run successfully
+3. Documentation is updated
+4. Tests pass (when available)
+
+## Troubleshooting
+
+### "Cannot open serial port"
+- Check that the device is connected
+- Verify the port path is correct
+- Ensure you have permissions to access the port
+
+### "Invalid handshake" or "Communication error"
+- Verify baud rate is correct (115200)
+- Check USB cable and connections
+- Try power cycling the device
+
+### MicroPython Issues
+- Ensure the module is compiled for your specific MicroPython platform
+- Check that your platform supports native C modules
+- Verify available memory (MicroPython has limited heap)
+
+## References
+
+- [TROPIC01 Product Page](https://tropicsquare.com/)
+- [tropic-rs Repository](https://github.com/8de2fdb0/tropic-rs)
+- [PyO3 Documentation](https://pyo3.rs/)
+- [MicroPython Documentation](https://docs.micropython.org/)
