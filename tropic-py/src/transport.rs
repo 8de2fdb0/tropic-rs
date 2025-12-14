@@ -7,7 +7,8 @@ use tropic_rs::{
 };
 
 // USB dongle specific constants
-const USB_DONGE_INITIAL_READ_DELAY: u32 = 300;
+// delay before doing a read, to give the fw time to prepare the response
+const USB_DONGLE_INITIAL_READ_DELAY: u32 = 300;
 const USB_DONGLE_READ_WRITE_DELAY: u32 = 10;
 
 const HEX_CHAR_LOOKUP: [u8; 16] = *b"0123456789ABCDEF";
@@ -164,7 +165,7 @@ impl TropicTransport for UsbDongleTransport {
         let mut chip_status = [0_u8; 1];
         let mut data = [0_u8; N];
 
-        self.delay_ms(USB_DONGE_INITIAL_READ_DELAY);
+        self.delay_ms(USB_DONGLE_INITIAL_READ_DELAY);
 
         while retry > 0 {
             retry -= 1;

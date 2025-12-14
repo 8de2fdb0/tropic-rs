@@ -176,12 +176,12 @@ impl PyTropic01 {
     /// Restart the device
     /// 
     /// Args:
-    ///     mode (str): Restart mode - "Reboot" or "Maintanance"
+    ///     mode (str): Restart mode - "Reboot" or "Maintenance"
     fn restart(&self, mode: &str) -> PyResult<()> {
         let mut tropic = self.tropic.lock().unwrap();
         let restart_mode = match mode {
             "Reboot" => RestartMode::Reboot,
-            "Maintanance" => RestartMode::Maintanance,
+            "Maintenance" | "Maintanance" => RestartMode::Maintanance,
             _ => return Err(PyException::new_err("Invalid restart mode")),
         };
         

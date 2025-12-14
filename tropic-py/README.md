@@ -169,7 +169,7 @@ Create a new TROPIC01 instance connected via USB dongle.
 ##### Power Management
 
 - `sleep(kind: str)` - Put device to sleep ("Regular" or "Deep")
-- `restart(mode: str)` - Restart device ("Reboot" or "Maintanance")
+- `restart(mode: str)` - Restart device ("Reboot" or "Maintenance")
 
 ##### Session Management
 
