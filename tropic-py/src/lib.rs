@@ -110,7 +110,7 @@ impl PyTropic01 {
         
         let version = tropic.get_firmware_version(fw_type).map_err(TropicError::from)?;
         // Convert version data to hex string
-        Ok(hex::encode(&version.version))
+        Ok(hex::encode(version.version))
     }
 
     /// Get firmware boot header for a specific bank
@@ -242,7 +242,7 @@ impl PyTropic01 {
         let mut tropic = self.tropic.lock().unwrap();
         let mut sess = session.session.lock().unwrap();
         
-        let resp = tropic.ping(&mut *sess, message).map_err(TropicError::from)?;
+        let resp = tropic.ping(&mut sess, message).map_err(TropicError::from)?;
         Ok(resp.msg().to_vec())
     }
     
@@ -261,8 +261,8 @@ impl PyTropic01 {
         let pairing_slot = PairingKeySlot::try_from(slot)
             .map_err(|e| PyException::new_err(format!("{:?}", e)))?;
         
-        let resp = tropic.pairing_key_read(&mut *sess, pairing_slot).map_err(TropicError::from)?;
-        Ok(hex::encode(&resp.s_hipub))
+        let resp = tropic.pairing_key_read(&mut sess, pairing_slot).map_err(TropicError::from)?;
+        Ok(hex::encode(resp.s_hipub))
     }
     
     /// Write pairing key public key
@@ -289,7 +289,7 @@ impl PyTropic01 {
         
         let pubkey = PublicKey::from(<[u8; 32]>::try_from(&pubkey_bytes[..]).unwrap());
         
-        tropic.pairing_key_write(&mut *sess, pairing_slot, &pubkey).map_err(TropicError::from)?;
+        tropic.pairing_key_write(&mut sess, pairing_slot, &pubkey).map_err(TropicError::from)?;
         Ok(())
     }
     
@@ -304,7 +304,7 @@ impl PyTropic01 {
         let mut tropic = self.tropic.lock().unwrap();
         let mut sess = session.session.lock().unwrap();
         
-        let config = tropic.r_config_read(&mut *sess).map_err(TropicError::from)?;
+        let config = tropic.r_config_read(&mut sess).map_err(TropicError::from)?;
         let json = serde_json::to_string_pretty(&config).map_err(json_error_to_pyerr)?;
         Ok(json)
     }
@@ -321,7 +321,7 @@ impl PyTropic01 {
         let config: tropic_rs::common::config::Config = serde_json::from_str(config_json)
             .map_err(json_error_to_pyerr)?;
         
-        tropic.r_config_write(&mut *sess, &config).map_err(TropicError::from)?;
+        tropic.r_config_write(&mut sess, &config).map_err(TropicError::from)?;
         Ok(())
     }
 }

@@ -73,6 +73,72 @@ print(handshake)
 tropic.abort_session()
 ```
 
+## API Coverage
+
+This Python binding implements the core TROPIC01 functionality based on the USB dongle transport. The implementation covers all methods used in the `tropic-usb-dongle` example application.
+
+### Implemented Methods
+
+#### Device Information (L2 - No Session Required)
+- ✅ `get_chip_status()` - Get chip status
+- ✅ `get_chip_id()` - Get chip ID
+- ✅ `get_firmware_version(fw_type)` - Get firmware version
+- ✅ `get_firmware_boot_header(bank_id)` - Get boot header
+- ✅ `get_riscv_firmware_log()` - Get firmware log
+- ✅ `get_cert_store()` - Get certificate store
+
+#### Power Management (L2 - No Session Required)
+- ✅ `sleep(kind)` - Put device to sleep
+- ✅ `restart(mode)` - Restart device
+
+#### Session Management (L2 - No Session Required)
+- ✅ `get_handshake(pairing_key_slot)` - Get handshake for session
+- ✅ `abort_session()` - Abort current session
+
+#### Session Operations (L3 - Requires EncSession)
+- ✅ `ping(session, message)` - Ping device
+- ✅ `pairing_key_read(session, slot)` - Read pairing key
+- ✅ `pairing_key_write(session, slot, pubkey_hex)` - Write pairing key
+- ✅ `r_config_read(session)` - Read reversible config
+- ✅ `r_config_write(session, config_json)` - Write reversible config
+
+### Not Yet Implemented
+
+The following methods are available in the Rust API but not yet exposed in Python bindings:
+
+#### Advanced Session Operations
+- ⏳ `pairing_key_invalidate(session, slot)` - Invalidate pairing key
+- ⏳ `r_config_erase(session)` - Erase reversible config
+- ⏳ `i_config_read(session)` - Read irreversible config
+- ⏳ `i_config_write(session, config)` - Write irreversible config
+
+#### Data Storage
+- ⏳ `r_mem_data_read(session, slot)` - Read user data
+- ⏳ `r_mem_data_write(session, slot, data)` - Write user data
+- ⏳ `r_mem_data_erase(session, slot)` - Erase user data
+
+#### Cryptographic Operations
+- ⏳ `random_value(session, n_bytes)` - Get random bytes
+- ⏳ `ecc_key_generate(session, slot, curve)` - Generate ECC key
+- ⏳ `ecc_key_store(session, slot, curve, secret)` - Store ECC key
+- ⏳ `ecc_key_read_pubkey(session, slot)` - Read ECC public key
+- ⏳ `ecc_key_erase(session, slot)` - Erase ECC key
+- ⏳ `ecc_ecdsa_sign(session, slot, message)` - ECDSA sign
+- ⏳ `ecc_eddsa_sign(session, slot, message)` - EdDSA sign
+
+#### Counters
+- ⏳ `mcounter_init(session, index, value)` - Initialize counter
+- ⏳ `mcounter_update(session, index)` - Update counter
+- ⏳ `mcounter_get(session, index)` - Get counter value
+
+#### Other
+- ⏳ `mac_and_destroy(session, slot, data)` - MAC and destroy operation
+- ⏳ `serial_code_get(session)` - Get serial code
+- ⏳ `resend_response()` - Resend last response
+- ⏳ `mutable_firmware_erase(bank_id)` - Erase firmware bank
+
+These methods can be added as needed. The current implementation covers all the functionality demonstrated in the `tropic-usb-dongle` CLI tool.
+
 ## API Reference
 
 ### Tropic01 Class
