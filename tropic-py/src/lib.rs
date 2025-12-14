@@ -229,11 +229,176 @@ impl PyTropic01 {
         tropic.abort_session().map_err(TropicError::from)?;
         Ok(())
     }
+    
+    /// Ping the device
+    /// 
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     message (bytes): Message to send
+    /// 
+    /// Returns:
+    ///     bytes: Response message
+    fn ping(&self, session: &PyEncSession, message: &[u8]) -> PyResult<Vec<u8>> {
+        let mut tropic = self.tropic.lock().unwrap();
+        let mut sess = session.session.lock().unwrap();
+        
+        let resp = tropic.ping(&mut *sess, message).map_err(TropicError::from)?;
+        Ok(resp.msg().to_vec())
+    }
+    
+    /// Read pairing key public key
+    /// 
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): Pairing key slot (0-3)
+    /// 
+    /// Returns:
+    ///     str: Public key as hex string
+    fn pairing_key_read(&self, session: &PyEncSession, slot: u8) -> PyResult<String> {
+        let mut tropic = self.tropic.lock().unwrap();
+        let mut sess = session.session.lock().unwrap();
+        
+        let pairing_slot = PairingKeySlot::try_from(slot)
+            .map_err(|e| PyException::new_err(format!("{:?}", e)))?;
+        
+        let resp = tropic.pairing_key_read(&mut *sess, pairing_slot).map_err(TropicError::from)?;
+        Ok(hex::encode(&resp.s_hipub))
+    }
+    
+    /// Write pairing key public key
+    /// 
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): Pairing key slot (0-3)
+    ///     pubkey_hex (str): Public key as hex string (32 bytes)
+    fn pairing_key_write(&self, session: &PyEncSession, slot: u8, pubkey_hex: &str) -> PyResult<()> {
+        use tropic_rs::external::x25519_dalek::PublicKey;
+        
+        let mut tropic = self.tropic.lock().unwrap();
+        let mut sess = session.session.lock().unwrap();
+        
+        let pairing_slot = PairingKeySlot::try_from(slot)
+            .map_err(|e| PyException::new_err(format!("{:?}", e)))?;
+        
+        let pubkey_bytes = hex::decode(pubkey_hex)
+            .map_err(|e| PyException::new_err(format!("Invalid pubkey hex: {}", e)))?;
+        
+        if pubkey_bytes.len() != 32 {
+            return Err(PyException::new_err("pubkey must be 32 bytes"));
+        }
+        
+        let pubkey = PublicKey::from(<[u8; 32]>::try_from(&pubkey_bytes[..]).unwrap());
+        
+        tropic.pairing_key_write(&mut *sess, pairing_slot, &pubkey).map_err(TropicError::from)?;
+        Ok(())
+    }
+    
+    /// Read reversible config
+    /// 
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    /// 
+    /// Returns:
+    ///     str: Config as JSON string
+    fn r_config_read(&self, session: &PyEncSession) -> PyResult<String> {
+        let mut tropic = self.tropic.lock().unwrap();
+        let mut sess = session.session.lock().unwrap();
+        
+        let config = tropic.r_config_read(&mut *sess).map_err(TropicError::from)?;
+        let json = serde_json::to_string_pretty(&config).map_err(json_error_to_pyerr)?;
+        Ok(json)
+    }
+    
+    /// Write reversible config
+    /// 
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     config_json (str): Config as JSON string
+    fn r_config_write(&self, session: &PyEncSession, config_json: &str) -> PyResult<()> {
+        let mut tropic = self.tropic.lock().unwrap();
+        let mut sess = session.session.lock().unwrap();
+        
+        let config: tropic_rs::common::config::Config = serde_json::from_str(config_json)
+            .map_err(json_error_to_pyerr)?;
+        
+        tropic.r_config_write(&mut *sess, &config).map_err(TropicError::from)?;
+        Ok(())
+    }
+}
+
+/// Python wrapper for encrypted session
+#[pyclass]
+struct PyEncSession {
+    session: Mutex<tropic_rs::l3::session::EncSession>,
+}
+
+#[pymethods]
+impl PyEncSession {
+    /// Create a new encrypted session
+    /// 
+    /// Args:
+    ///     tropic (PyTropic01): The Tropic01 instance
+    ///     pairing_key_slot (int): Pairing key slot (0-3)
+    ///     sh_secret_hex (str): Static host secret as hex string
+    ///     st_pubkey_hex (str): Static TROPIC01 public key as hex string
+    /// 
+    /// Returns:
+    ///     PyEncSession: New encrypted session
+    #[staticmethod]
+    fn create(tropic: &PyTropic01, pairing_key_slot: u8, sh_secret_hex: &str, st_pubkey_hex: &str) -> PyResult<Self> {
+        use tropic_rs::external::x25519_dalek::{StaticSecret, PublicKey};
+        
+        let slot = PairingKeySlot::try_from(pairing_key_slot)
+            .map_err(|e| PyException::new_err(format!("{:?}", e)))?;
+        
+        // Decode hex strings
+        let sh_secret_bytes = hex::decode(sh_secret_hex)
+            .map_err(|e| PyException::new_err(format!("Invalid sh_secret hex: {}", e)))?;
+        let st_pubkey_bytes = hex::decode(st_pubkey_hex)
+            .map_err(|e| PyException::new_err(format!("Invalid st_pubkey hex: {}", e)))?;
+        
+        if sh_secret_bytes.len() != 32 {
+            return Err(PyException::new_err("sh_secret must be 32 bytes"));
+        }
+        if st_pubkey_bytes.len() != 32 {
+            return Err(PyException::new_err("st_pubkey must be 32 bytes"));
+        }
+        
+        let sh_secret = StaticSecret::from(<[u8; 32]>::try_from(&sh_secret_bytes[..]).unwrap());
+        let st_pubkey = PublicKey::from(<[u8; 32]>::try_from(&st_pubkey_bytes[..]).unwrap());
+        
+        let mut tropic_lock = tropic.tropic.lock().unwrap();
+        let session = tropic_lock
+            .create_session(rand::rng(), &sh_secret, slot, &st_pubkey)
+            .map_err(TropicError::from)?;
+        
+        Ok(Self {
+            session: Mutex::new(session),
+        })
+    }
+    
+    /// Serialize session to JSON
+    fn to_json(&self) -> PyResult<String> {
+        let session = self.session.lock().unwrap();
+        let json = serde_json::to_string_pretty(&*session).map_err(json_error_to_pyerr)?;
+        Ok(json)
+    }
+    
+    /// Deserialize session from JSON
+    #[staticmethod]
+    fn from_json(json: &str) -> PyResult<Self> {
+        let session: tropic_rs::l3::session::EncSession = serde_json::from_str(json)
+            .map_err(json_error_to_pyerr)?;
+        Ok(Self {
+            session: Mutex::new(session),
+        })
+    }
 }
 
 /// Python module for tropic-rs
 #[pymodule]
 fn _tropic_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTropic01>()?;
+    m.add_class::<PyEncSession>()?;
     Ok(())
 }

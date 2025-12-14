@@ -5,10 +5,10 @@ This module provides a Python interface to the TROPIC01 secure element,
 compatible with both CPython and MicroPython.
 """
 
-from ._tropic_py import PyTropic01
+from ._tropic_py import PyTropic01, PyEncSession
 
 __version__ = "0.1.0"
-__all__ = ["Tropic01"]
+__all__ = ["Tropic01", "EncSession"]
 
 
 class Tropic01(PyTropic01):
@@ -47,3 +47,23 @@ class Tropic01(PyTropic01):
         """Context manager cleanup"""
         # No cleanup needed for now
         return False
+
+
+class EncSession(PyEncSession):
+    """
+    Encrypted session wrapper for TROPIC01.
+    
+    This class wraps an encrypted session and provides methods
+    for session management and serialization.
+    
+    Example:
+        >>> # Create session from handshake
+        >>> session = EncSession.create(tropic, 0, sh_secret_hex, st_pubkey_hex)
+        >>> # Use session for operations
+        >>> response = tropic.ping(session, b"hello")
+        >>> # Save session
+        >>> session_json = session.to_json()
+        >>> # Restore session
+        >>> session = EncSession.from_json(session_json)
+    """
+    pass

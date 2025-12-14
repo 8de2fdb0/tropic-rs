@@ -110,6 +110,25 @@ Create a new TROPIC01 instance connected via USB dongle.
 - `get_handshake(pairing_key_slot: int)` - Get handshake for session (slot 0-3)
 - `abort_session()` - Abort current session
 
+##### Session Operations (require EncSession)
+
+- `ping(session: EncSession, message: bytes)` - Ping device, returns response bytes
+- `pairing_key_read(session: EncSession, slot: int)` - Read pairing key public key
+- `pairing_key_write(session: EncSession, slot: int, pubkey_hex: str)` - Write pairing key
+- `r_config_read(session: EncSession)` - Read reversible config as JSON
+- `r_config_write(session: EncSession, config_json: str)` - Write reversible config
+
+### EncSession Class
+
+#### Static Methods
+
+- `EncSession.create(tropic: Tropic01, pairing_key_slot: int, sh_secret_hex: str, st_pubkey_hex: str)` - Create encrypted session
+- `EncSession.from_json(json: str)` - Restore session from JSON
+
+#### Methods
+
+- `to_json()` - Serialize session to JSON string
+
 ## Examples
 
 See the `examples/` directory for complete examples:
