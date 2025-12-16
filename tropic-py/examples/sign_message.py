@@ -15,7 +15,7 @@ This example shows how to:
 import json
 import nacl.signing
 
-from tropic_py import Tropic01, EncSession, Bytes64
+from tropic_py import Tropic01, EncSession
 
 def extract_device_pubkey(cert_store):
     for certificate in cert_store.get("certificates"):
