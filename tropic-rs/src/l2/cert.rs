@@ -95,6 +95,7 @@ impl From<usize> for CertKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PubKeyAlgorithm {
     X25519Pubkey,
     EcPubkeyP384,
