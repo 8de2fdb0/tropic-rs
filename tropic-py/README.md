@@ -18,7 +18,7 @@ This package provides a Python interface to the TROPIC01 secure element using th
 
 ```bash
 # Create a venv in this folder
-pip -m venv .venv && source .venv/bin/avtivate
+python3 -m venv .venv && source .venv/bin/activate
 
 # Install maturin for building
 pip install .
