@@ -63,7 +63,7 @@ fn json_error_to_pyerr(err: serde_json::Error) -> PyErr {
 }
 
 macro_rules! impl_byte_value {
-    ($name:ident,  $size:expr) => {
+    ($name:ident, $size:expr) => {
         #[gen_stub_pymethods]
         #[pymethods]
         impl $name {
