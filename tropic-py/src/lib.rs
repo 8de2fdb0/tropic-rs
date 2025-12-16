@@ -145,7 +145,7 @@ impl_byte_value!(PyBytes32, 32);
 ///   >>> b16_hex = "00112233445566778899aabbccddeeff"
 ///   >>> b64_hex = b16_hex * 4  # 16 bytes * 4 = 64 bytes
 ///   >>> b64 = Bytes64.from_hex(b64_hex)
-///   >>> b64 = Bytes64.from_hex("aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899")    
+///   >>> b64 = Bytes64.from_hex("aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899")
 ///   >>> print(len(b64))
 #[gen_stub_pyclass]
 #[pyclass(name = "Bytes64")]
