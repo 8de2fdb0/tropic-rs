@@ -31,7 +31,6 @@ maturin build --release
 pip install target/wheels/tropic_py-*.whl
 ```
 
-# 
 
 
 ### MicroPython
