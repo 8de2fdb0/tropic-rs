@@ -86,7 +86,7 @@ impl PyTropic01 {
         let mut tropic = self
             .tropic
             .as_ref()
-            .ok_or(PyException::new_err("tropic not intialised"))?
+            .ok_or(PyException::new_err("tropic not initialised"))?
             .lock()
             .unwrap();
         let result = callback(&mut tropic)?;
@@ -957,7 +957,7 @@ impl PyEncSession {
         let mut tropic_lock = tropic
             .tropic
             .as_ref()
-            .ok_or(PyException::new_err("tropic not intialised"))?
+            .ok_or(PyException::new_err("tropic not initialised"))?
             .lock()
             .unwrap();
         let session = tropic_lock
