@@ -6,13 +6,17 @@ use std::sync::Mutex;
 use tropic_cert_store::nom_decoder::NomDecoder;
 use tropic_rs::{
     cert_store::CERT_BUFFER_LEN,
-    common::PairingKeySlot,
+    common::{
+        ecc::{EccCurve, EccKeySlot},
+        MacAndDestroySlot, MCounterIndex, PairingKeySlot, UserDataSlot,
+    },
     external::x25519_dalek::PublicKey,
     l2::{
         info::{BankId, FirmwareType},
         sleep::SleepKind,
         startup::RestartMode,
     },
+    l3::CMD_SECRET_KEY_LEN,
     Tropic01,
 };
 
@@ -435,6 +439,460 @@ impl PyTropic01 {
             Ok(())
         })?;
         Ok(())
+    }
+
+    /// Invalidate pairing key
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): Pairing key slot (0-3)
+    fn pairing_key_invalidate(&self, session: &PyEncSession, slot: u8) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let pairing_slot =
+                PairingKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            tropic
+                .pairing_key_invalidate(&mut sess, pairing_slot)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Erase reversible config
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    fn r_config_erase(&self, session: &PyEncSession) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            tropic
+                .r_config_erase(&mut sess)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Read irreversible config
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///
+    /// Returns:
+    ///     str: Config as JSON string
+    fn i_config_read(&self, session: &PyEncSession) -> PyResult<String> {
+        let mut sess = session.session.lock().unwrap();
+
+        let json = self.call_tropic(|tropic| {
+            let config = tropic.i_config_read(&mut sess).map_err(PyError::from)?;
+            let json = serde_json::to_string_pretty(&config)?;
+            Ok(json)
+        })?;
+
+        Ok(json)
+    }
+
+    /// Write irreversible config
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     config_json (str): Config as JSON string
+    fn i_config_write(&self, session: &PyEncSession, config_json: &str) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let config: tropic_rs::common::config::Config = serde_json::from_str(config_json)?;
+
+            tropic
+                .i_config_write(&mut sess, &config)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Read user data from memory slot
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): User data slot (0-511)
+    ///
+    /// Returns:
+    ///     bytes: User data
+    fn r_mem_data_read(&self, session: &PyEncSession, slot: u16) -> PyResult<Vec<u8>> {
+        let mut sess = session.session.lock().unwrap();
+
+        let data = self.call_tropic(|tropic| {
+            let user_slot =
+                UserDataSlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let resp = tropic
+                .r_mem_data_read(&mut sess, user_slot)
+                .map_err(PyError::from)?;
+            Ok(resp.user_data().to_vec())
+        })?;
+
+        Ok(data)
+    }
+
+    /// Write user data to memory slot
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): User data slot (0-511)
+    ///     data (bytes): Data to write (max 32 bytes)
+    fn r_mem_data_write(&self, session: &PyEncSession, slot: u16, data: &[u8]) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let user_slot =
+                UserDataSlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            tropic
+                .r_mem_data_write(&mut sess, user_slot, data)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Erase user data from memory slot
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): User data slot (0-511)
+    fn r_mem_data_erase(&self, session: &PyEncSession, slot: u16) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let user_slot =
+                UserDataSlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            tropic
+                .r_mem_data_erase(&mut sess, user_slot)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Get random bytes
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     n_bytes (int): Number of random bytes to get (max 32)
+    ///
+    /// Returns:
+    ///     bytes: Random bytes
+    fn random_value(&self, session: &PyEncSession, n_bytes: u8) -> PyResult<Vec<u8>> {
+        let mut sess = session.session.lock().unwrap();
+
+        let random_bytes = self.call_tropic(|tropic| {
+            let resp = tropic
+                .random_value(&mut sess, n_bytes)
+                .map_err(PyError::from)?;
+            Ok(resp.random_data().to_vec())
+        })?;
+
+        Ok(random_bytes)
+    }
+
+    /// Generate ECC key
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): ECC key slot (0-31)
+    ///     curve (str): Curve type ("P256" or "Ed25519")
+    fn ecc_key_generate(&self, session: &PyEncSession, slot: u16, curve: &str) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let ecc_slot =
+                EccKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let ecc_curve = match curve {
+                "P256" => EccCurve::P256,
+                "Ed25519" => EccCurve::Ed25519,
+                _ => return Err(PyError("Invalid curve type".to_string())),
+            };
+
+            tropic
+                .ecc_key_generate(&mut sess, ecc_slot, ecc_curve)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Store ECC key
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): ECC key slot (0-31)
+    ///     curve (str): Curve type ("P256" or "Ed25519")
+    ///     secret_hex (str): Secret key as hex string (32 bytes)
+    fn ecc_key_store(
+        &self,
+        session: &PyEncSession,
+        slot: u16,
+        curve: &str,
+        secret_hex: &str,
+    ) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let ecc_slot =
+                EccKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let ecc_curve = match curve {
+                "P256" => EccCurve::P256,
+                "Ed25519" => EccCurve::Ed25519,
+                _ => return Err(PyError("Invalid curve type".to_string())),
+            };
+
+            let secret_bytes = hex::decode(secret_hex).map_err(|e| {
+                PyError(format!("Failed to decode byte array from secret hex: {}", e))
+            })?;
+
+            if secret_bytes.len() != CMD_SECRET_KEY_LEN {
+                return Err(PyError(format!(
+                    "Secret key must be {} bytes",
+                    CMD_SECRET_KEY_LEN
+                )));
+            }
+
+            let secret: [u8; CMD_SECRET_KEY_LEN] = secret_bytes.try_into().unwrap();
+
+            tropic
+                .ecc_key_store(&mut sess, ecc_slot, ecc_curve, &secret)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Read ECC public key
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): ECC key slot (0-31)
+    ///
+    /// Returns:
+    ///     str: Public key as hex string
+    fn ecc_key_read_pubkey(&self, session: &PyEncSession, slot: u16) -> PyResult<String> {
+        let mut sess = session.session.lock().unwrap();
+
+        let pubkey_hex = self.call_tropic(|tropic| {
+            let ecc_slot =
+                EccKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let resp = tropic
+                .ecc_key_read_pubkey(&mut sess, ecc_slot)
+                .map_err(PyError::from)?;
+            Ok(hex::encode(resp.pubkey))
+        })?;
+
+        Ok(pubkey_hex)
+    }
+
+    /// Erase ECC key
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): ECC key slot (0-31)
+    fn ecc_key_erase(&self, session: &PyEncSession, slot: u16) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let ecc_slot =
+                EccKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            tropic
+                .ecc_key_erase(&mut sess, ecc_slot)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// ECDSA sign message
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): ECC key slot (0-31)
+    ///     message (bytes): Message to sign
+    ///
+    /// Returns:
+    ///     str: Signature as hex string
+    fn ecc_ecdsa_sign(&self, session: &PyEncSession, slot: u16, message: &[u8]) -> PyResult<String> {
+        let mut sess = session.session.lock().unwrap();
+
+        let signature_hex = self.call_tropic(|tropic| {
+            let ecc_slot =
+                EccKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let resp = tropic
+                .ecc_ecdsa_sign(&mut sess, ecc_slot, message)
+                .map_err(PyError::from)?;
+            Ok(hex::encode(resp.signature()))
+        })?;
+
+        Ok(signature_hex)
+    }
+
+    /// EdDSA sign message
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): ECC key slot (0-31)
+    ///     message (bytes): Message to sign
+    ///
+    /// Returns:
+    ///     str: Signature as hex string
+    fn ecc_eddsa_sign(&self, session: &PyEncSession, slot: u16, message: &[u8]) -> PyResult<String> {
+        let mut sess = session.session.lock().unwrap();
+
+        let signature_hex = self.call_tropic(|tropic| {
+            let ecc_slot =
+                EccKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let resp = tropic
+                .ecc_eddsa_sign(&mut sess, ecc_slot, message)
+                .map_err(PyError::from)?;
+            Ok(hex::encode(resp.signature()))
+        })?;
+
+        Ok(signature_hex)
+    }
+
+    /// Initialize monotonic counter
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     index (int): Counter index (0-15)
+    ///     value (int): Initial value
+    fn mcounter_init(&self, session: &PyEncSession, index: u16, value: u32) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let counter_index =
+                MCounterIndex::try_from(index).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            tropic
+                .mcounter_init(&mut sess, counter_index, value)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Update (increment) monotonic counter
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     index (int): Counter index (0-15)
+    fn mcounter_update(&self, session: &PyEncSession, index: u16) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let counter_index =
+                MCounterIndex::try_from(index).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            tropic
+                .mcounter_update(&mut sess, counter_index)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Get monotonic counter value
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     index (int): Counter index (0-15)
+    ///
+    /// Returns:
+    ///     int: Counter value
+    fn mcounter_get(&self, session: &PyEncSession, index: u16) -> PyResult<u32> {
+        let mut sess = session.session.lock().unwrap();
+
+        let value = self.call_tropic(|tropic| {
+            let counter_index =
+                MCounterIndex::try_from(index).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let resp = tropic
+                .mcounter_get(&mut sess, counter_index)
+                .map_err(PyError::from)?;
+            Ok(resp.mcounter)
+        })?;
+
+        Ok(value)
+    }
+
+    /// MAC and destroy operation
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): MAC and destroy slot (0-127)
+    ///     data (bytes): Data to MAC (32 bytes)
+    ///
+    /// Returns:
+    ///     bytes: Output data (32 bytes)
+    fn mac_and_destroy(&self, session: &PyEncSession, slot: u16, data: &[u8]) -> PyResult<Vec<u8>> {
+        let mut sess = session.session.lock().unwrap();
+
+        let output_data = self.call_tropic(|tropic| {
+            let mac_slot =
+                MacAndDestroySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            if data.len() != 32 {
+                return Err(PyError("Data must be 32 bytes".to_string()));
+            }
+
+            let data_array: [u8; 32] = data.try_into().unwrap();
+
+            let resp = tropic
+                .mac_and_destroy(&mut sess, &mac_slot, &data_array)
+                .map_err(PyError::from)?;
+            Ok(resp.data_out.to_vec())
+        })?;
+
+        Ok(output_data)
+    }
+
+    /// Get serial code
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///
+    /// Returns:
+    ///     str: Serial code as hex string
+    fn serial_code_get(&self, session: &PyEncSession) -> PyResult<String> {
+        let mut sess = session.session.lock().unwrap();
+
+        let serial_code_hex = self.call_tropic(|tropic| {
+            let resp = tropic
+                .serial_code_get(&mut sess)
+                .map_err(PyError::from)?;
+            Ok(hex::encode(resp.serial_code))
+        })?;
+
+        Ok(serial_code_hex)
     }
 }
 
