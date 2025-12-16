@@ -1,0 +1,21 @@
+[package]
+name = "tropic-py"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "tropic_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+tropic-rs = { path = "../tropic-rs", features = ["display", "serde"] }
+tropic-cert-store = { path = "../tropic-cert-store", features = ["nom-decoder", "serde"] }
+pyo3 = { version = "0.27", features = ["extension-module"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+serial2 = "0.2.33"
+rand = "0.9"
+hex = { package = "const-hex", version = "1.17" }
+
+[build-dependencies]
+pyo3-build-config = "0.27"
