@@ -6,11 +6,11 @@ This package provides a Python interface to the TROPIC01 secure element using th
 
 ## Features
 
-- **USB Dongle Transport**: Communicate with TROPIC01 via USB serial interface
-- **Full API Access**: All TROPIC01 methods exposed through Python
-- **CPython Compatible**: Works with Python 3.7+
-- **MicroPython Compatible**: Can be compiled for MicroPython platforms
-- **Type-Safe**: Built on top of the Rust `tropic-rs` crate using PyO3
+- ✅ **USB Dongle Transport**: Communicate with TROPIC01 via USB serial interface
+- ⏳ **Full API Access**: All TROPIC01 methods exposed through Python
+- ✅ **CPython Compatible**: Works with Python 3.7+
+- ⏳ **MicroPython Compatible**: Can be compiled for MicroPython platforms
+- ✅ **Type-Safe**: Built on top of the Rust `tropic-rs` crate using PyO3
 
 ## Installation
 
@@ -31,7 +31,7 @@ pip install target/wheels/tropic_py-*.whl
 
 ### MicroPython
 
-MicroPython support requires compiling the native module for your specific platform. See the MicroPython documentation for details on building native modules.
+TODO
 
 ## Usage
 
@@ -201,7 +201,6 @@ See the `examples/` directory for complete examples:
 
 - `basic_usage.py` - Basic device information retrieval
 - `session_management.py` - Session handshake and management
-- `micropython_example.py` - MicroPython-compatible example
 
 ## Requirements
 
@@ -209,10 +208,6 @@ See the `examples/` directory for complete examples:
 - Python 3.7 or later
 - Rust toolchain (for building)
 - maturin (for building)
-
-### MicroPython
-- MicroPython 1.19 or later
-- Cross-compilation toolchain for target platform
 
 ## Platform Support
 
