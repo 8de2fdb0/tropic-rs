@@ -20,3 +20,10 @@ classifiers = [
 [tool.maturin]
 python-source = "python"
 module-name = "tropic_py._tropic_py"
+features = ["pyo3/extension-module"]
+
+[project.optional-dependencies]
+dev = [
+    "pynacl>=1.6.1",
+    "maturin>=1.0,<2.0",
+]

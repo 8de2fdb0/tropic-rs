@@ -17,17 +17,22 @@ This package provides a Python interface to the TROPIC01 secure element using th
 ### CPython (Standard Python)
 
 ```bash
+# Create a venv in this folder
+pip -m venv .venv && source .venv/bin/avtivate
+
 # Install maturin for building
-pip install maturin
+pip install .
 
 # Build and install in development mode
-cd tropic-py
 maturin develop --release
 
 # Or build a wheel
 maturin build --release
 pip install target/wheels/tropic_py-*.whl
 ```
+
+# 
+
 
 ### MicroPython
 
