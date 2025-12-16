@@ -125,10 +125,10 @@ macro_rules! impl_byte_value {
 /// High-level Python interface for 32-byte byte array.
 ///
 /// Example:
-///   >>> from tropic_py import Bytes64
+///   >>> from tropic_py import Bytes32
 ///   >>> b16_hex = "00112233445566778899aabbccddeeff"
 ///   >>> b32_hex = b16_hex * 2  # 16 bytes * 2 = 32 bytes
-///   >>> b32 = Bytes64.from_hex(b32_hex)
+///   >>> b32 = Bytes32.from_hex(b32_hex)
 ///   >>> print(len(b32))
 #[gen_stub_pyclass]
 #[pyclass(name = "Bytes32")]
