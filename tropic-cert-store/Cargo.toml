@@ -20,6 +20,7 @@ defmt = { version = "1", default-features = false, optional = true }
 
 serde = { version = "1.0", features = ["derive"], optional = true }
 base64ct = { version = "1.8", features = [], optional = true }
+hex = { package = "const-hex", version = "1.17", optional = true }
 
 [features]
 default = ["der-decoder", "nom-decoder"]
@@ -27,4 +28,7 @@ display = []
 defmt = ["dep:defmt"]
 der-decoder = ["dep:der", "dep:der_derive", "dep:spki"]
 nom-decoder = ["dep:nom"]
-serde = ["dep:serde", "dep:base64ct", "tropic-rs/serde"]
+serde = ["dep:serde", "dep:base64ct", "dep:hex", "tropic-rs/serde"]
+
+[dev-dependencies]
+serde_json = "1"
