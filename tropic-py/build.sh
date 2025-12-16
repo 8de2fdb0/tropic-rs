@@ -12,6 +12,10 @@ if ! command -v maturin &> /dev/null; then
     exit 1
 fi
 
+# We use 'generate-stubs' (auto-initialize) so the binary can run standalone
+echo "📝 Generating type stubs..."
+cargo run --bin stub_gen
+
 # Build the package
 echo "Building Python package..."
 maturin build --release

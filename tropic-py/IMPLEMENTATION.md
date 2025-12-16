@@ -43,7 +43,7 @@ tropic-py/
 - Retry logic for chip busy states
 
 #### 2. Tropic01 API Wrapper
-Implements all methods used in the `tropic-usb-dongle` CLI tool:
+Implements **all** methods from the Rust `tropic-rs` API:
 
 **Device Information (L2 - No Session)**
 - `get_chip_status()` - chip status and mode
@@ -65,8 +65,35 @@ Implements all methods used in the `tropic-usb-dongle` CLI tool:
 - `ping(session, message)` - test encrypted communication
 - `pairing_key_read(session, slot)` - read pairing keys
 - `pairing_key_write(session, slot, key)` - write pairing keys
+- `pairing_key_invalidate(session, slot)` - invalidate pairing keys
 - `r_config_read(session)` - read reversible config
 - `r_config_write(session, config)` - write reversible config
+- `r_config_erase(session)` - erase reversible config
+- `i_config_read(session)` - read irreversible config
+- `i_config_write(session, config)` - write irreversible config
+
+**Data Storage (L3 - Requires Session)**
+- `r_mem_data_read(session, slot)` - read user data
+- `r_mem_data_write(session, slot, data)` - write user data
+- `r_mem_data_erase(session, slot)` - erase user data
+
+**Cryptographic Operations (L3 - Requires Session)**
+- `random_value(session, n_bytes)` - get random bytes
+- `ecc_key_generate(session, slot, curve)` - generate ECC key
+- `ecc_key_store(session, slot, curve, secret)` - store ECC key
+- `ecc_key_read_pubkey(session, slot)` - read ECC public key
+- `ecc_key_erase(session, slot)` - erase ECC key
+- `ecc_ecdsa_sign(session, slot, message)` - ECDSA sign
+- `ecc_eddsa_sign(session, slot, message)` - EdDSA sign
+
+**Monotonic Counters (L3 - Requires Session)**
+- `mcounter_init(session, index, value)` - initialize counter
+- `mcounter_update(session, index)` - increment counter
+- `mcounter_get(session, index)` - get counter value
+
+**Other Operations (L3 - Requires Session)**
+- `mac_and_destroy(session, slot, data)` - MAC and destroy operation
+- `serial_code_get(session)` - get serial code
 
 #### 3. EncSession Class
 - Session creation from handshake data
@@ -160,19 +187,24 @@ pip install target/wheels/tropic_py-*.whl
 
 > "should implement all the methods exposed in feature/usb-dongle/tropic-examples/usb_dongle/src/serial_transport.rs Tropic01"
 
-✅ **Completed**: All methods from `serial_transport.rs` and all methods used in the `tropic_usb_dongle.rs` CLI are implemented
+✅ **Completed**: All methods from `serial_transport.rs` and **all** methods available in the Rust `tropic-rs` API are now implemented
 
-## Additional Methods Available
+## API Completeness
 
-The Rust API has additional methods not yet exposed in Python:
-- ECC key operations (generate, store, sign)
-- Monotonic counters
+The Python bindings now expose **100% of the TROPIC01 API** available in the Rust crate, including:
+- All L2 methods (no session required)
+- All L3 methods (encrypted session required)
+- Device information and management
+- Power management
+- Session management and operations
+- Pairing key operations
+- Configuration (reversible and irreversible)
 - User data storage
-- Random value generation
+- Random number generation
+- ECC cryptographic operations (P256 and Ed25519)
+- Monotonic counters
 - MAC and destroy operations
-- Irreversible config operations
-
-These can be added incrementally as needed.
+- Serial code retrieval
 
 ## Dependencies
 

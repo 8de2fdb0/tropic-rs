@@ -1,18 +1,29 @@
-use pyo3::exceptions::PyException;
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
 use std::sync::Mutex;
+
+use pyo3::prelude::*;
+use pyo3::{
+    exceptions::PyException,
+    types::{PyDict, PyType},
+};
+use pyo3_stub_gen::{
+    define_stub_info_gatherer,
+    derive::{gen_stub_pyclass, gen_stub_pymethods},
+};
 
 use tropic_cert_store::nom_decoder::NomDecoder;
 use tropic_rs::{
     cert_store::CERT_BUFFER_LEN,
-    common::PairingKeySlot,
+    common::{
+        ecc::{EccCurve, EccKeySlot},
+        MCounterIndex, MacAndDestroySlot, PairingKeySlot, UserDataSlot,
+    },
     external::x25519_dalek::PublicKey,
     l2::{
         info::{BankId, FirmwareType},
         sleep::SleepKind,
         startup::RestartMode,
     },
+    l3::CMD_SECRET_KEY_LEN,
     Tropic01,
 };
 
@@ -51,6 +62,100 @@ fn json_error_to_pyerr(err: serde_json::Error) -> PyErr {
     PyException::new_err(format!("JSON error: {}", err))
 }
 
+macro_rules! impl_byte_value {
+    ($name:ident, $size:expr) => {
+        #[gen_stub_pymethods]
+        #[pymethods]
+        impl $name {
+            #[new]
+            fn new(value: [u8; $size]) -> Self {
+                Self { value }
+            }
+
+            #[classmethod]
+            fn from_hex(_cls: &Bound<'_, PyType>, hex_str: &str) -> PyResult<Self> {
+                let bytes = hex::decode(hex_str).map_err(|e| {
+                    PyException::new_err(format!(
+                        "Failed to decode byte array from hex string: {}",
+                        e
+                    ))
+                })?;
+
+                if bytes.len() != $size {
+                    return Err(PyException::new_err(format!(
+                        "Hex string must represent {} bytes, not {} bytes",
+                        $size,
+                        bytes.len()
+                    )));
+                }
+
+                let mut value = [0u8; $size];
+                value.copy_from_slice(&bytes[..]);
+
+                Ok(Self { value })
+            }
+
+            fn __len__(&self) -> usize {
+                $size
+            }
+
+            fn __bytes__(&self) -> Vec<u8> {
+                self.value.to_vec()
+            }
+
+            fn __str__(&self) -> String {
+                hex::encode(&self.value)
+            }
+
+            fn len(&self) -> usize {
+                $size
+            }
+
+            fn to_bytes(&self) -> Vec<u8> {
+                self.__bytes__()
+            }
+
+            fn to_hex(&self) -> String {
+                self.__str__()
+            }
+        }
+    };
+}
+
+/// High-level Python interface for 32-byte byte array.
+///
+/// Example:
+///   >>> from tropic_py import Bytes32
+///   >>> b16_hex = "00112233445566778899aabbccddeeff"
+///   >>> b32_hex = b16_hex * 2  # 16 bytes * 2 = 32 bytes
+///   >>> b32 = Bytes32.from_hex(b32_hex)
+///   >>> print(len(b32))
+#[gen_stub_pyclass]
+#[pyclass(name = "Bytes32")]
+struct PyBytes32 {
+    value: [u8; 32],
+}
+
+impl_byte_value!(PyBytes32, 32);
+
+/// High-level Python interface for 64-byte byte array.
+///
+/// Example:
+///   >>> from tropic_py import Bytes64
+///   >>> b16_hex = "00112233445566778899aabbccddeeff"
+///   >>> b64_hex = b16_hex * 4  # 16 bytes * 4 = 64 bytes
+///   >>> b64 = Bytes64.from_hex(b64_hex)
+///   >>> b64 = Bytes64.from_hex("aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899")
+///   >>> print(len(b64))
+#[gen_stub_pyclass]
+#[pyclass(name = "Bytes64")]
+struct PyBytes64 {
+    value: [u8; 64],
+}
+
+impl_byte_value!(PyBytes64, 64);
+
+#[gen_stub_pyclass]
 #[derive(serde::Serialize)]
 struct PyHandshakeResp {
     et_pubkey: String,
@@ -67,6 +172,7 @@ struct PyHandshakeResp {
 ///     >>> status = tropic.get_chip_status()
 ///     >>> print(status)
 ///     {'ready': True, 'alarm': False, 'chip_mode': 'Application'}
+#[gen_stub_pyclass]
 #[pyclass(name = "Tropic01")]
 struct PyTropic01 {
     tropic: Option<Mutex<Tropic01<UsbDongleTransport, NomDecoder>>>,
@@ -82,7 +188,7 @@ impl PyTropic01 {
         let mut tropic = self
             .tropic
             .as_ref()
-            .ok_or(PyException::new_err("tropic not intialised"))?
+            .ok_or(PyException::new_err("tropic not initialised"))?
             .lock()
             .unwrap();
         let result = callback(&mut tropic)?;
@@ -90,6 +196,7 @@ impl PyTropic01 {
     }
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyTropic01 {
     /// Create a new Tropic01 instance connected via USB dongle
@@ -324,7 +431,11 @@ impl PyTropic01 {
     ///
     /// Returns:
     ///     bytes: Response message
-    fn ping(&self, session: &PyEncSession, message: &[u8]) -> PyResult<Vec<u8>> {
+    fn ping(
+        &self,
+        session: &PyEncSession,
+        #[gen_stub(override_type(type_repr = "bytes"))] message: &[u8],
+    ) -> PyResult<Vec<u8>> {
         let mut sess = session.session.lock().unwrap();
 
         let resp = self.call_tropic(|tropic| {
@@ -338,38 +449,38 @@ impl PyTropic01 {
     /// Read pairing key public key
     ///
     /// Args:
-    ///     session (PyEncSession): Active encrypted session
+    ///     session (EncSession): Active encrypted session
     ///     slot (int): Pairing key slot (0-3)
     ///
     /// Returns:
-    ///     str: Public key as hex string
-    fn pairing_key_read(&self, session: &PyEncSession, slot: u8) -> PyResult<String> {
+    ///     Bytes32: Public key as 32 bytes
+    fn pairing_key_read(&self, session: &PyEncSession, slot: u8) -> PyResult<PyBytes32> {
         let mut sess = session.session.lock().unwrap();
 
-        let pairing_key_hex = self.call_tropic(|tropic| {
+        let pairing_key = self.call_tropic(|tropic| {
             let pairing_slot =
                 PairingKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
 
             let resp = tropic
                 .pairing_key_read(&mut sess, pairing_slot)
                 .map_err(PyError::from)?;
-            Ok(hex::encode(resp.s_hipub))
+            Ok(resp.s_hipub)
         })?;
 
-        Ok(pairing_key_hex)
+        Ok(PyBytes32::new(pairing_key))
     }
 
     /// Write pairing key public key
     ///
     /// Args:
-    ///     session (PyEncSession): Active encrypted session
+    ///     session (EncSession): Active encrypted session
     ///     slot (int): Pairing key slot (0-3)
-    ///     pubkey_hex (str): Public key as hex string (32 bytes)
+    ///     pubkey (Bytes32): Public key as 32 bytes
     fn pairing_key_write(
         &self,
         session: &PyEncSession,
         slot: u8,
-        pubkey_hex: &str,
+        pubkey: &Bound<'_, PyBytes32>,
     ) -> PyResult<()> {
         let mut sess = session.session.lock().unwrap();
 
@@ -377,18 +488,7 @@ impl PyTropic01 {
             let pairing_slot =
                 PairingKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
 
-            let pubkey_bytes = hex::decode(pubkey_hex).map_err(|e| {
-                PyError(format!(
-                    "Failed to decode byte array from pubkey hex: {}",
-                    e
-                ))
-            })?;
-
-            if pubkey_bytes.len() != 32 {
-                return Err(PyError("pubkey must be 32 bytes".to_string()));
-            }
-
-            let pubkey = PublicKey::from(<[u8; 32]>::try_from(&pubkey_bytes[..]).unwrap());
+            let pubkey = PublicKey::from(<[u8; 32]>::try_from(pubkey.borrow().value).unwrap());
 
             tropic
                 .pairing_key_write(&mut sess, pairing_slot, &pubkey)
@@ -436,6 +536,477 @@ impl PyTropic01 {
         })?;
         Ok(())
     }
+
+    /// Invalidate pairing key
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): Pairing key slot (0-3)
+    fn pairing_key_invalidate(&self, session: &PyEncSession, slot: u8) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let pairing_slot =
+                PairingKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            tropic
+                .pairing_key_invalidate(&mut sess, pairing_slot)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Erase reversible config
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    fn r_config_erase(&self, session: &PyEncSession) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            tropic.r_config_erase(&mut sess).map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Read irreversible config
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///
+    /// Returns:
+    ///     str: Config as JSON string
+    fn i_config_read(&self, session: &PyEncSession) -> PyResult<String> {
+        let mut sess = session.session.lock().unwrap();
+
+        let json = self.call_tropic(|tropic| {
+            let config = tropic.i_config_read(&mut sess).map_err(PyError::from)?;
+            let json = serde_json::to_string_pretty(&config)?;
+            Ok(json)
+        })?;
+
+        Ok(json)
+    }
+
+    /// Write irreversible config
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     config_json (str): Config as JSON string
+    fn i_config_write(&self, session: &PyEncSession, config_json: &str) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let config: tropic_rs::common::config::Config = serde_json::from_str(config_json)?;
+
+            tropic
+                .i_config_write(&mut sess, &config)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Read user data from memory slot
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): User data slot (0-511)
+    ///
+    /// Returns:
+    ///     bytes: User data
+    fn r_mem_data_read(&self, session: &PyEncSession, slot: u16) -> PyResult<Vec<u8>> {
+        let mut sess = session.session.lock().unwrap();
+
+        let data = self.call_tropic(|tropic| {
+            let user_slot =
+                UserDataSlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let resp = tropic
+                .r_mem_data_read(&mut sess, user_slot)
+                .map_err(PyError::from)?;
+            Ok(resp.user_data().to_vec())
+        })?;
+
+        Ok(data)
+    }
+
+    /// Write user data to memory slot
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): User data slot (0-511)
+    ///     data (bytes): Data to write (max 32 bytes)
+    fn r_mem_data_write(
+        &self,
+        session: &PyEncSession,
+        slot: u16,
+        #[gen_stub(override_type(type_repr = "bytes"))] data: &[u8],
+    ) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let user_slot =
+                UserDataSlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            tropic
+                .r_mem_data_write(&mut sess, user_slot, data)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Erase user data from memory slot
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): User data slot (0-511)
+    fn r_mem_data_erase(&self, session: &PyEncSession, slot: u16) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let user_slot =
+                UserDataSlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            tropic
+                .r_mem_data_erase(&mut sess, user_slot)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Get random bytes
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     n_bytes (int): Number of random bytes to get (max 32)
+    ///
+    /// Returns:
+    ///     bytes: Random bytes
+    fn random_value(&self, session: &PyEncSession, n_bytes: u8) -> PyResult<Vec<u8>> {
+        let mut sess = session.session.lock().unwrap();
+
+        let random_bytes = self.call_tropic(|tropic| {
+            let resp = tropic
+                .random_value(&mut sess, n_bytes)
+                .map_err(PyError::from)?;
+            Ok(resp.random_data().to_vec())
+        })?;
+
+        Ok(random_bytes)
+    }
+
+    /// Generate ECC key
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): ECC key slot (0-31)
+    ///     curve (str): Curve type ("P256" or "Ed25519")
+    fn ecc_key_generate(&self, session: &PyEncSession, slot: u16, curve: &str) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let ecc_slot = EccKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let ecc_curve = match curve {
+                "P256" => EccCurve::P256,
+                "Ed25519" => EccCurve::Ed25519,
+                _ => return Err(PyError("Invalid curve type".to_string())),
+            };
+
+            tropic
+                .ecc_key_generate(&mut sess, ecc_slot, ecc_curve)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Store ECC key
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): ECC key slot (0-31)
+    ///     curve (str): Curve type ("P256" or "Ed25519")
+    ///     secret (Bytes32): Secret key as 32 bytes
+    fn ecc_key_store(
+        &self,
+        session: &PyEncSession,
+        slot: u16,
+        curve: &str,
+        secret: &Bound<'_, PyBytes32>,
+    ) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let ecc_slot = EccKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let ecc_curve = match curve {
+                "P256" => EccCurve::P256,
+                "Ed25519" => EccCurve::Ed25519,
+                _ => return Err(PyError("Invalid curve type".to_string())),
+            };
+
+            let secret: [u8; CMD_SECRET_KEY_LEN] = secret.borrow().value;
+
+            tropic
+                .ecc_key_store(&mut sess, ecc_slot, ecc_curve, &secret)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Read ECC public key
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): ECC key slot (0-31)
+    ///
+    /// Returns:
+    ///     Bytes32|Bytes64: Public key as bytes
+    fn ecc_key_read_pubkey<'py>(
+        &self,
+        py: Python<'py>,
+        session: &PyEncSession,
+        slot: u16,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let mut sess = session.session.lock().unwrap();
+
+        let ecc_read_key_resp = self.call_tropic(|tropic| {
+            let ecc_slot = EccKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let resp = tropic
+                .ecc_key_read_pubkey(&mut sess, ecc_slot)
+                .map_err(PyError::from)?;
+            Ok(resp)
+        })?;
+
+        let pubkey = ecc_read_key_resp.pubkey();
+        match pubkey.len() {
+            64 => {
+                // P256 compressed
+                let pubkey = PyBytes64::new(pubkey.try_into()?);
+                Ok(Bound::new(py, pubkey)?.into_any())
+            }
+            32 => {
+                // Ed25519
+                let pubkey = PyBytes32::new(pubkey.try_into()?);
+                Ok(Bound::new(py, pubkey)?.into_any())
+            }
+            _ => Err(PyException::new_err("Unexpected public key length")),
+        }
+    }
+
+    /// Erase ECC key
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): ECC key slot (0-31)
+    fn ecc_key_erase(&self, session: &PyEncSession, slot: u16) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let ecc_slot = EccKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            tropic
+                .ecc_key_erase(&mut sess, ecc_slot)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// ECDSA sign message
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): ECC key slot (0-31)
+    ///     message (bytes): Message to sign
+    ///
+    /// Returns:
+    ///     bytes: Signature as bytes
+    fn ecc_ecdsa_sign(
+        &self,
+        session: &PyEncSession,
+        slot: u16,
+        #[gen_stub(override_type(type_repr = "bytes"))] message: &[u8],
+    ) -> PyResult<PyBytes64> {
+        let mut sess = session.session.lock().unwrap();
+
+        let signature = self.call_tropic(|tropic| {
+            let ecc_slot = EccKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let resp = tropic
+                .ecc_ecdsa_sign(&mut sess, ecc_slot, message)
+                .map_err(PyError::from)?;
+            Ok(resp.signature())
+        })?;
+
+        Ok(PyBytes64::new(signature))
+    }
+
+    /// EdDSA sign message
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): ECC key slot (0-31)
+    ///     message (bytes): Message to sign
+    ///
+    /// Returns:
+    ///     bytes: Signature as bytes
+    fn ecc_eddsa_sign(
+        &self,
+        session: &PyEncSession,
+        slot: u16,
+        #[gen_stub(override_type(type_repr = "bytes"))] message: &[u8],
+    ) -> PyResult<PyBytes64> {
+        let mut sess = session.session.lock().unwrap();
+
+        let signature = self.call_tropic(|tropic| {
+            let ecc_slot = EccKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let resp = tropic
+                .ecc_eddsa_sign(&mut sess, ecc_slot, message)
+                .map_err(PyError::from)?;
+            Ok(resp.signature())
+        })?;
+
+        Ok(PyBytes64::new(signature))
+    }
+
+    /// Initialize monotonic counter
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     index (int): Counter index (0-15)
+    ///     value (int): Initial value
+    fn mcounter_init(&self, session: &PyEncSession, index: u16, value: u32) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let counter_index =
+                MCounterIndex::try_from(index).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            tropic
+                .mcounter_init(&mut sess, counter_index, value)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Update (increment) monotonic counter
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     index (int): Counter index (0-15)
+    fn mcounter_update(&self, session: &PyEncSession, index: u16) -> PyResult<()> {
+        let mut sess = session.session.lock().unwrap();
+
+        self.call_tropic(|tropic| {
+            let counter_index =
+                MCounterIndex::try_from(index).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            tropic
+                .mcounter_update(&mut sess, counter_index)
+                .map_err(PyError::from)?;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Get monotonic counter value
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     index (int): Counter index (0-15)
+    ///
+    /// Returns:
+    ///     int: Counter value
+    fn mcounter_get(&self, session: &PyEncSession, index: u16) -> PyResult<u32> {
+        let mut sess = session.session.lock().unwrap();
+
+        let value = self.call_tropic(|tropic| {
+            let counter_index =
+                MCounterIndex::try_from(index).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            let resp = tropic
+                .mcounter_get(&mut sess, counter_index)
+                .map_err(PyError::from)?;
+            Ok(resp.mcounter)
+        })?;
+
+        Ok(value)
+    }
+
+    /// MAC and destroy operation
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///     slot (int): MAC and destroy slot (0-127)
+    ///     data (bytes): Data to MAC (32 bytes)
+    ///
+    /// Returns:
+    ///     bytes: Output data (32 bytes)
+    fn mac_and_destroy(
+        &self,
+        session: &PyEncSession,
+        slot: u16,
+        #[gen_stub(override_type(type_repr = "bytes"))] data: &[u8],
+    ) -> PyResult<Vec<u8>> {
+        let mut sess = session.session.lock().unwrap();
+
+        let output_data = self.call_tropic(|tropic| {
+            let mac_slot =
+                MacAndDestroySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
+
+            if data.len() != 32 {
+                return Err(PyError("Data must be 32 bytes".to_string()));
+            }
+
+            let data_array: [u8; 32] = data.try_into().unwrap();
+
+            let resp = tropic
+                .mac_and_destroy(&mut sess, &mac_slot, &data_array)
+                .map_err(PyError::from)?;
+            Ok(resp.data_out.to_vec())
+        })?;
+
+        Ok(output_data)
+    }
+
+    /// Get serial code
+    ///
+    /// Args:
+    ///     session (PyEncSession): Active encrypted session
+    ///
+    /// Returns:
+    ///     str: Serial code as hex string
+    fn serial_code_get(&self, session: &PyEncSession) -> PyResult<PyBytes32> {
+        let mut sess = session.session.lock().unwrap();
+
+        let serial_code = self.call_tropic(|tropic| {
+            let resp = tropic.serial_code_get(&mut sess).map_err(PyError::from)?;
+            Ok(resp.serial_code)
+        })?;
+
+        Ok(PyBytes32::new(serial_code))
+    }
 }
 
 /// Encrypted session wrapper for TROPIC01.
@@ -451,11 +1022,13 @@ impl PyTropic01 {
 ///    >>> session_json = session.to_json()
 ///    >>> /// Restore session
 ///    >>> session = EncSession.from_json(session_json)
+#[gen_stub_pyclass]
 #[pyclass(name = "EncSession")]
 struct PyEncSession {
     session: Mutex<tropic_rs::l3::session::EncSession>,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyEncSession {
     /// Create a new encrypted session
@@ -499,7 +1072,7 @@ impl PyEncSession {
         let mut tropic_lock = tropic
             .tropic
             .as_ref()
-            .ok_or(PyException::new_err("tropic not intialised"))?
+            .ok_or(PyException::new_err("tropic not initialised"))?
             .lock()
             .unwrap();
         let session = tropic_lock
@@ -532,7 +1105,11 @@ impl PyEncSession {
 /// Python module for tropic-rs
 #[pymodule]
 fn _tropic_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyBytes32>()?;
+    m.add_class::<PyBytes64>()?;
     m.add_class::<PyTropic01>()?;
     m.add_class::<PyEncSession>()?;
     Ok(())
 }
+
+define_stub_info_gatherer!(stub_info);

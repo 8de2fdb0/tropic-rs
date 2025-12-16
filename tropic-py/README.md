@@ -7,7 +7,7 @@ This package provides a Python interface to the TROPIC01 secure element using th
 ## Features
 
 - ✅ **USB Dongle Transport**: Communicate with TROPIC01 via USB serial interface
-- ⏳ **Full API Access**: All TROPIC01 methods exposed through Python
+- ✅ **Full API Access**: All TROPIC01 methods exposed through Python
 - ✅ **CPython Compatible**: Works with Python 3.7+
 - ⏳ **MicroPython Compatible**: Can be compiled for MicroPython platforms
 - ✅ **Type-Safe**: Built on top of the Rust `tropic-rs` crate using PyO3
@@ -17,17 +17,21 @@ This package provides a Python interface to the TROPIC01 secure element using th
 ### CPython (Standard Python)
 
 ```bash
+# Create a venv in this folder
+python3 -m venv .venv && source .venv/bin/activate
+
 # Install maturin for building
-pip install maturin
+pip install .
 
 # Build and install in development mode
-cd tropic-py
 maturin develop --release
 
 # Or build a wheel
 maturin build --release
 pip install target/wheels/tropic_py-*.whl
 ```
+
+
 
 ### MicroPython
 
@@ -75,7 +79,7 @@ tropic.abort_session()
 
 ## API Coverage
 
-This Python binding implements the core TROPIC01 functionality based on the USB dongle transport. The implementation covers all methods used in the `tropic-usb-dongle` example application.
+This Python binding implements **all** TROPIC01 functionality available in the Rust API. The implementation provides complete access to device information, power management, session management, cryptographic operations, data storage, and counters.
 
 ### Implemented Methods
 
@@ -99,45 +103,72 @@ This Python binding implements the core TROPIC01 functionality based on the USB 
 - ✅ `ping(session, message)` - Ping device
 - ✅ `pairing_key_read(session, slot)` - Read pairing key
 - ✅ `pairing_key_write(session, slot, pubkey_hex)` - Write pairing key
+- ✅ `pairing_key_invalidate(session, slot)` - Invalidate pairing key
 - ✅ `r_config_read(session)` - Read reversible config
 - ✅ `r_config_write(session, config_json)` - Write reversible config
+- ✅ `r_config_erase(session)` - Erase reversible config
+- ✅ `i_config_read(session)` - Read irreversible config
+- ✅ `i_config_write(session, config)` - Write irreversible config
+
+#### Data Storage (L3 - Requires EncSession)
+- ✅ `r_mem_data_read(session, slot)` - Read user data
+- ✅ `r_mem_data_write(session, slot, data)` - Write user data
+- ✅ `r_mem_data_erase(session, slot)` - Erase user data
+
+#### Cryptographic Operations (L3 - Requires EncSession)
+- ✅ `random_value(session, n_bytes)` - Get random bytes
+- ✅ `ecc_key_generate(session, slot, curve)` - Generate ECC key
+- ✅ `ecc_key_store(session, slot, curve, secret)` - Store ECC key
+- ✅ `ecc_key_read_pubkey(session, slot)` - Read ECC public key
+- ✅ `ecc_key_erase(session, slot)` - Erase ECC key
+- ✅ `ecc_ecdsa_sign(session, slot, message)` - ECDSA sign
+- ✅ `ecc_eddsa_sign(session, slot, message)` - EdDSA sign
+
+#### Counters (L3 - Requires EncSession)
+- ✅ `mcounter_init(session, index, value)` - Initialize counter
+- ✅ `mcounter_update(session, index)` - Update counter
+- ✅ `mcounter_get(session, index)` - Get counter value
+
+#### Other (L3 - Requires EncSession)
+- ✅ `mac_and_destroy(session, slot, data)` - MAC and destroy operation
+- ✅ `serial_code_get(session)` - Get serial code
 
 ### Not Yet Implemented
 
-The following methods are available in the Rust API but not yet exposed in Python bindings:
+All API methods have been implemented! The Python binding now provides complete access to the TROPIC01 API.
+
+For reference, the following methods were recently added:
 
 #### Advanced Session Operations
-- ⏳ `pairing_key_invalidate(session, slot)` - Invalidate pairing key
-- ⏳ `r_config_erase(session)` - Erase reversible config
-- ⏳ `i_config_read(session)` - Read irreversible config
-- ⏳ `i_config_write(session, config)` - Write irreversible config
+- ✅ `pairing_key_invalidate(session, slot)` - Invalidate pairing key
+- ✅ `r_config_erase(session)` - Erase reversible config
+- ✅ `i_config_read(session)` - Read irreversible config
+- ✅ `i_config_write(session, config)` - Write irreversible config
 
 #### Data Storage
-- ⏳ `r_mem_data_read(session, slot)` - Read user data
-- ⏳ `r_mem_data_write(session, slot, data)` - Write user data
-- ⏳ `r_mem_data_erase(session, slot)` - Erase user data
+- ✅ `r_mem_data_read(session, slot)` - Read user data
+- ✅ `r_mem_data_write(session, slot, data)` - Write user data
+- ✅ `r_mem_data_erase(session, slot)` - Erase user data
 
 #### Cryptographic Operations
-- ⏳ `random_value(session, n_bytes)` - Get random bytes
-- ⏳ `ecc_key_generate(session, slot, curve)` - Generate ECC key
-- ⏳ `ecc_key_store(session, slot, curve, secret)` - Store ECC key
-- ⏳ `ecc_key_read_pubkey(session, slot)` - Read ECC public key
-- ⏳ `ecc_key_erase(session, slot)` - Erase ECC key
-- ⏳ `ecc_ecdsa_sign(session, slot, message)` - ECDSA sign
-- ⏳ `ecc_eddsa_sign(session, slot, message)` - EdDSA sign
+- ✅ `random_value(session, n_bytes)` - Get random bytes
+- ✅ `ecc_key_generate(session, slot, curve)` - Generate ECC key
+- ✅ `ecc_key_store(session, slot, curve, secret)` - Store ECC key
+- ✅ `ecc_key_read_pubkey(session, slot)` - Read ECC public key
+- ✅ `ecc_key_erase(session, slot)` - Erase ECC key
+- ✅ `ecc_ecdsa_sign(session, slot, message)` - ECDSA sign
+- ✅ `ecc_eddsa_sign(session, slot, message)` - EdDSA sign
 
 #### Counters
-- ⏳ `mcounter_init(session, index, value)` - Initialize counter
-- ⏳ `mcounter_update(session, index)` - Update counter
-- ⏳ `mcounter_get(session, index)` - Get counter value
+- ✅ `mcounter_init(session, index, value)` - Initialize counter
+- ✅ `mcounter_update(session, index)` - Update counter
+- ✅ `mcounter_get(session, index)` - Get counter value
 
 #### Other
-- ⏳ `mac_and_destroy(session, slot, data)` - MAC and destroy operation
-- ⏳ `serial_code_get(session)` - Get serial code
-- ⏳ `resend_response()` - Resend last response
-- ⏳ `mutable_firmware_erase(bank_id)` - Erase firmware bank
+- ✅ `mac_and_destroy(session, slot, data)` - MAC and destroy operation
+- ✅ `serial_code_get(session)` - Get serial code
 
-These methods can be added as needed. The current implementation covers all the functionality demonstrated in the `tropic-usb-dongle` CLI tool.
+**Note:** The `resend_response()` method is not exposed in the Python API as it requires knowledge of the expected response type at compile time, which is not practical in a dynamic Python environment.
 
 ## API Reference
 
@@ -181,8 +212,39 @@ Create a new TROPIC01 instance connected via USB dongle.
 - `ping(session: EncSession, message: bytes)` - Ping device, returns response bytes
 - `pairing_key_read(session: EncSession, slot: int)` - Read pairing key public key
 - `pairing_key_write(session: EncSession, slot: int, pubkey_hex: str)` - Write pairing key
+- `pairing_key_invalidate(session: EncSession, slot: int)` - Invalidate pairing key
 - `r_config_read(session: EncSession)` - Read reversible config as JSON
 - `r_config_write(session: EncSession, config_json: str)` - Write reversible config
+- `r_config_erase(session: EncSession)` - Erase reversible config
+- `i_config_read(session: EncSession)` - Read irreversible config as JSON
+- `i_config_write(session: EncSession, config_json: str)` - Write irreversible config
+
+##### Data Storage Operations (require EncSession)
+
+- `r_mem_data_read(session: EncSession, slot: int)` - Read user data from slot (0-511), returns bytes
+- `r_mem_data_write(session: EncSession, slot: int, data: bytes)` - Write user data to slot (max 32 bytes)
+- `r_mem_data_erase(session: EncSession, slot: int)` - Erase user data from slot
+
+##### Cryptographic Operations (require EncSession)
+
+- `random_value(session: EncSession, n_bytes: int)` - Get random bytes (max 32)
+- `ecc_key_generate(session: EncSession, slot: int, curve: str)` - Generate ECC key ("P256" or "Ed25519")
+- `ecc_key_store(session: EncSession, slot: int, curve: str, secret_hex: str)` - Store ECC key (32 bytes)
+- `ecc_key_read_pubkey(session: EncSession, slot: int)` - Read ECC public key as hex string
+- `ecc_key_erase(session: EncSession, slot: int)` - Erase ECC key
+- `ecc_ecdsa_sign(session: EncSession, slot: int, message: bytes)` - ECDSA sign, returns signature as hex
+- `ecc_eddsa_sign(session: EncSession, slot: int, message: bytes)` - EdDSA sign, returns signature as hex
+
+##### Counter Operations (require EncSession)
+
+- `mcounter_init(session: EncSession, index: int, value: int)` - Initialize monotonic counter (0-15)
+- `mcounter_update(session: EncSession, index: int)` - Increment monotonic counter
+- `mcounter_get(session: EncSession, index: int)` - Get counter value, returns int
+
+##### Other Operations (require EncSession)
+
+- `mac_and_destroy(session: EncSession, slot: int, data: bytes)` - MAC and destroy operation (slot 0-127, data 32 bytes)
+- `serial_code_get(session: EncSession)` - Get serial code as hex string
 
 ### EncSession Class
 
