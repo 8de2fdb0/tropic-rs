@@ -1,4 +1,4 @@
-use std::{sync::Mutex, usize};
+use std::sync::Mutex;
 
 use pyo3::prelude::*;
 use pyo3::{
