@@ -7,7 +7,8 @@ use tempfile::{Builder, NamedTempFile};
 
 use tropic_rs::common::config::{Config as TropciConfig, application, application_uap, bootloader};
 
-const CHIP_ID: &str = "AQAAAAAAAAAAAAAAQUNBQoCq//8B8AIAAAAAAAAAAAAAAP//AfACAAAAAAAAAAAAAAAAAALwAgAA
+pub const CHIP_ID: &str =
+    "AQAAAAAAAAAAAAAAQUNBQoCq//8B8AIAAAAAAAAAAAAAAP//AfACAAAAAAAAAAAAAAAAAALwAgAA
 ABkGGwkzAAAAAAANVFIwMS1DMlMtVDIwMP//AQTYlmEoAAx97ahwGQYbCTP///8=";
 
 const I_PAIRING_KEYS_0: &str = "+XXrPC/XkMlvKU8VV6UDF4DJqvoUDaKPVedRVzeyUCw=";

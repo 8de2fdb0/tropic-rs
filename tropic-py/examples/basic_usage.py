@@ -6,19 +6,24 @@ This example shows how to connect to a TROPIC01 device via USB dongle
 and retrieve basic device information.
 """
 
+import logging
 import json
 from tropic_py import Tropic01
 
+# This captures logs from both Python and the Rust extension
+logging.basicConfig(
+    level=logging.DEBUG,
+    format=" %(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 def main():
     # Connect to TROPIC01 via USB dongle
     # On Linux: /dev/ttyACM0, on macOS: /dev/tty.usbmodem*, on Windows: COM*
-    PORT = "/dev/ttyACM0"
-    BAUD_RATE = 115200
+    # PORT = "/dev/ttyACM0"
+    # BAUD_RATE = 115200
     
-    print(f"Connecting to TROPIC01 on {PORT}...")
-    
-    with Tropic01(PORT, BAUD_RATE) as tropic:
+    print(f"Connecting to TROPIC01 model server on default port...")
+    with Tropic01.new_model_server() as tropic:
         # Get chip status
         print("\n=== Chip Status ===")
         status = tropic.get_chip_status()
@@ -37,11 +42,11 @@ def main():
         fw_version = tropic.get_firmware_version("Riscv")
         print(f"Firmware version (hex): {fw_version}")
         
-        # Get firmware boot header
-        print("\n=== Firmware Boot Header (Bank 1) ===")
-        boot_header_json = tropic.get_firmware_boot_header(1)
-        boot_header = json.loads(boot_header_json)
-        print(json.dumps(boot_header, indent=2))
+        # # Get firmware boot header
+        # print("\n=== Firmware Boot Header (Bank 1) ===")
+        # boot_header_json = tropic.get_firmware_boot_header(1)
+        # boot_header = json.loads(boot_header_json)
+        # print(json.dumps(boot_header, indent=2))
         
         # Get firmware log
         print("\n=== RISC-V Firmware Log ===")

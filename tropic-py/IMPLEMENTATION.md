@@ -23,13 +23,19 @@ tropic-py/
 ├── README.md                           # Comprehensive documentation
 ├── src/
 │   ├── lib.rs                          # Main Python bindings
-│   └── transport.rs                    # USB dongle transport implementation
+│   └── transport/
+│      ├── mod.rs                       # Python Transport
+│      ├── model_server.rs              # Model Server transport implementation
+│      └── usb_dongle.rs                # USB dongle transport implementation
+
 ├── python/
 │   └── tropic_py/
 │       └── __init__.py                 # Python wrapper module
 └── examples/
     ├── basic_usage.py                  # Basic device info example
+    ├── bytes.py                        # Bytes types example
     ├── session_management.py           # Session operations example
+    ├── sign_message.py                 # Signing operations example
     └── micropython_example.py          # MicroPython-compatible example
 ```
 

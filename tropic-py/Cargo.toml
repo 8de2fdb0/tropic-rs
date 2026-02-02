@@ -13,10 +13,15 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 tropic-rs = { path = "../tropic-rs", features = ["display", "serde"] }
-tropic-cert-store = { path = "../tropic-cert-store", features = ["nom-decoder", "serde"] }
+tropic-cert-store = { path = "../tropic-cert-store", features = [
+    "nom-decoder",
+    "serde",
+] }
 #pyo3 = { version = "0.27", features = ["extension-module"] }
 pyo3 = { version = "0.27" }
 pyo3-stub-gen = "0.17"
+pyo3-log = "0.13"
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 serial2 = "0.2.33"

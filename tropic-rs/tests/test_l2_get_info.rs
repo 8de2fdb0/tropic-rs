@@ -1,7 +1,10 @@
 mod testing_common;
 
 use log::info;
-use tropic_rs::{cert_store, l2::info::FirmwareType};
+use tropic_rs::{
+    cert_store,
+    l2::info::{FirmwareBootHeader, FirmwareType},
+};
 
 use crate::testing_common::*;
 
@@ -230,6 +233,10 @@ fn test_l2_firmware_versions() {
         .get_firmware_version(FirmwareType::Spect)
         .expect("failed to get spect firmware versions");
     assert_eq!(spect_firmware_versions.version, SPECT_FW_VERSION);
+
+    let firmware_boot_header = tropic_01
+        .get_firmware_boot_header(tropic_rs::l2::info::BankId::FwBankFw1)
+        .expect("failded to get firmware bootheader for fw1");
 
     model_server.cleanup();
 }

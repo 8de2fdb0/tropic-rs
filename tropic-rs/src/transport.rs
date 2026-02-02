@@ -1,10 +1,15 @@
 use core::fmt::Debug;
 
 use embedded_hal::{
-    delay::DelayNs,
     digital::{Error as _, OutputPin},
-    spi::{Error as _, SpiBus, SpiDevice},
+    spi::Error as _,
 };
+
+pub use embedded_hal::delay::DelayNs;
+
+pub mod spi {
+    pub use embedded_hal::spi::{Error, ErrorKind, ErrorType, Operation, SpiBus, SpiDevice};
+}
 
 use crate::l1::{self, Response};
 
@@ -61,7 +66,7 @@ pub trait TropicTransport {
 }
 
 pub struct SpiDeviceTransport<T, D> {
-    device: T,
+    pub device: T,
     delay: D,
 }
 
@@ -71,9 +76,30 @@ impl<T, D> SpiDeviceTransport<T, D> {
     }
 }
 
+// impl<T, D> spi::ErrorType for SpiDeviceTransport<T, D>
+// where
+//     T: spi::SpiDevice,
+// {
+//     type Error = T::Error;
+// }
+
+// impl<T, D> spi::SpiDevice for SpiDeviceTransport<T, D>
+// where
+//     T: spi::SpiDevice,
+//     D: DelayNs,
+// {
+//     fn transaction(
+//         &mut self,
+//         operations: &mut [spi::Operation<'_, u8>],
+//     ) -> Result<(), Self::Error> {
+//         // Delegate directly to the inner device
+//         self.device.transaction(operations)
+//     }
+// }
+
 impl<T, D> TropicTransport for SpiDeviceTransport<T, D>
 where
-    T: SpiDevice,
+    T: spi::SpiDevice,
     D: DelayNs,
 {
     fn transfer_in_place(&mut self, buf: &mut [u8]) -> Result<(), Error> {
@@ -111,7 +137,7 @@ impl<T, D, CS> SpiBusTransport<T, D, CS> {
 
 impl<T, D, CS> TropicTransport for SpiBusTransport<T, D, CS>
 where
-    T: SpiBus,
+    T: spi::SpiBus,
     D: DelayNs,
     CS: OutputPin,
 {

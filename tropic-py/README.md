@@ -21,7 +21,8 @@ This package provides a Python interface to the TROPIC01 secure element using th
 python3 -m venv .venv && source .venv/bin/activate
 
 # Install maturin for building
-pip install .
+# pip install .
+pip install ".[dev]"
 
 # Build and install in development mode
 maturin develop --release
@@ -31,7 +32,11 @@ maturin build --release
 pip install target/wheels/tropic_py-*.whl
 ```
 
+## Generating python types
 
+```bash
+cargo run --bin stub_gen
+```
 
 ### MicroPython
 

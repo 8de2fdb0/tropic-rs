@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::{net::IpAddr, sync::Mutex};
 
 use pyo3::prelude::*;
 use pyo3::{
@@ -28,7 +28,9 @@ use tropic_rs::{
 };
 
 mod transport;
-use transport::UsbDongleTransport;
+use transport::PyTropicTransport;
+
+use crate::transport::model_server;
 
 // Error wrapper for Python
 #[derive(Debug)]
@@ -48,7 +50,14 @@ impl From<PyError> for PyErr {
 
 impl From<transport::Error> for PyErr {
     fn from(err: transport::Error) -> PyErr {
-        PyException::new_err(format!("{:?}", err))
+        match err {
+            transport::Error::ModelServer(e) => {
+                PyException::new_err(format!("ModelServer error: {}", e))
+            }
+            transport::Error::UsbDongle(e) => {
+                PyException::new_err(format!("UsbDongle error: {}", e))
+            }
+        }
     }
 }
 
@@ -163,6 +172,11 @@ struct PyHandshakeResp {
     static_secret: String,
 }
 
+pub enum PyTropicContext {
+    UsbDongle { port: String, baud_rate: u32 },
+    ModelServer { port: u16, ip_addr: IpAddr },
+}
+
 /// High-level Python interface to TROPIC01 secure element.
 ///
 /// This class provides a Pythonic interface to all TROPIC01 functionality.   
@@ -175,15 +189,14 @@ struct PyHandshakeResp {
 #[gen_stub_pyclass]
 #[pyclass(name = "Tropic01")]
 struct PyTropic01 {
-    tropic: Option<Mutex<Tropic01<UsbDongleTransport, NomDecoder>>>,
-    port: String,
-    baud_rate: u32,
+    tropic: Option<Mutex<Tropic01<PyTropicTransport, NomDecoder>>>,
+    ctx: PyTropicContext,
 }
 
 impl PyTropic01 {
     fn call_tropic<F, T>(&self, mut callback: F) -> PyResult<T>
     where
-        F: FnMut(&mut Tropic01<UsbDongleTransport, NomDecoder>) -> Result<T, PyError>,
+        F: FnMut(&mut Tropic01<PyTropicTransport, NomDecoder>) -> Result<T, PyError>,
     {
         let mut tropic = self
             .tropic
@@ -199,32 +212,65 @@ impl PyTropic01 {
 #[gen_stub_pymethods]
 #[pymethods]
 impl PyTropic01 {
-    /// Create a new Tropic01 instance connected via USB dongle
+    /// Create a new Tropic01 instance connected to a STM32 USB dongle running the usb2spi firmware
+    ///
+    /// see: [USB firmware used by TROPIC01's USB devkit](https://github.com/tropicsquare/tropic01-stm32u5-usb-devkit-fw)
     ///
     /// Args:
     ///     port (str): Serial port path (e.g., "/dev/ttyACM0")
     ///     baud_rate (int): Baud rate (default: 115200)
-    #[new]
+    #[staticmethod]
     #[pyo3(signature = (port, baud_rate=115200))]
-    fn new(port: &str, baud_rate: u32) -> PyResult<Self> {
-        let transport = UsbDongleTransport::new(port, baud_rate)?;
+    fn new_usb_dongle(port: &str, baud_rate: u32) -> PyResult<Self> {
+        let transport = PyTropicTransport::new_usb_dongle(port, baud_rate)?;
         let tropic = Tropic01::<_, NomDecoder>::new(transport);
         Ok(Self {
             tropic: Some(Mutex::new(tropic)),
-            port: port.to_string(),
-            baud_rate,
+            ctx: PyTropicContext::UsbDongle {
+                port: port.to_string(),
+                baud_rate,
+            },
+        })
+    }
+
+    /// Create a new Tropic01 instance connected to the model server via tcp
+    ///
+    /// see: [TROPIC Verification Library](https://github.com/tropicsquare/ts-tvl)
+    ///
+    /// Args:
+    ///     ip_addr (str): IP address of the model server (default: "127.0.0.1")
+    ///     port (int): Port number of the model server (default: 28992)
+    ///
+    #[staticmethod]
+    #[pyo3(signature = (ip_addr=transport::model_server::DEFAULT_TCP_ADDR, port=transport::model_server::DEFAULT_TCP_PORT))]
+    fn new_model_server(ip_addr: &str, port: u16) -> PyResult<Self> {
+        let ip_addr: IpAddr = ip_addr.parse().map_err(|e| {
+            PyException::new_err(format!("Invalid IP address '{}': {}", ip_addr, e))
+        })?;
+        let transport = PyTropicTransport::new_model_server(ip_addr, port)?;
+        let tropic = Tropic01::<_, NomDecoder>::new(transport);
+        Ok(Self {
+            tropic: Some(Mutex::new(tropic)),
+            ctx: PyTropicContext::ModelServer { ip_addr, port },
         })
     }
 
     /// Context manager entry point. Returns self.
     fn __enter__(mut slf: PyRefMut<Self>) -> PyResult<PyRefMut<Self>> {
-        let transport = UsbDongleTransport::new(&slf.port, slf.baud_rate)?;
+        let transport = match &slf.ctx {
+            PyTropicContext::UsbDongle { port, baud_rate } => {
+                PyTropicTransport::new_usb_dongle(port, *baud_rate)?
+            }
+            PyTropicContext::ModelServer { ip_addr, port } => {
+                PyTropicTransport::new_model_server(*ip_addr, *port)?
+            }
+        };
         let tropic = Tropic01::<_, NomDecoder>::new(transport);
         slf.tropic = Some(Mutex::new(tropic));
         Ok(slf)
     }
 
-    /// Context manager exit point. Automatically calls `close()` to release the serial port.
+    /// Context manager exit point. Automatically release all resources.
     fn __exit__(
         &mut self,
         _exc_type: Py<PyAny>,
@@ -1109,6 +1155,8 @@ fn _tropic_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyBytes64>()?;
     m.add_class::<PyTropic01>()?;
     m.add_class::<PyEncSession>()?;
+
+    pyo3_log::init();
     Ok(())
 }
 

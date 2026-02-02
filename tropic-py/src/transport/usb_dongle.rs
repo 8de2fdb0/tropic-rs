@@ -1,10 +1,7 @@
 use serial2::{SerialPort, Settings};
 use std::vec::Vec;
 
-use tropic_rs::{
-    l1::{ChipMode, ChipStatus, Response, GET_RESPONSE_REQ_ID, READ_MAX_TRIES, READ_RETRY_DELAY},
-    transport::{Error as TransportError, TropicTransport},
-};
+use tropic_rs::transport::{self, spi};
 
 // USB dongle specific constants
 // delay before doing a read, to give the fw time to prepare the response
@@ -14,7 +11,9 @@ const USB_DONGLE_READ_WRITE_DELAY: u32 = 10;
 const HEX_CHAR_LOOKUP: [u8; 16] = *b"0123456789ABCDEF";
 
 // Constants for usb-dongle fw communication
+const CS_LOW_REQ: [u8; 5] = *b"CS=1\n";
 const CS_HIGH_REQ: [u8; 5] = *b"CS=0\n";
+
 const OK_RESP: [u8; 4] = *b"OK\r\n";
 
 #[non_exhaustive]
@@ -23,6 +22,16 @@ pub enum Error {
     Io(std::io::Error),
     ReqLen,
     InvalidHexChar,
+}
+
+impl spi::Error for Error {
+    fn kind(&self) -> spi::ErrorKind {
+        match self {
+            Error::Io(_) => spi::ErrorKind::Other,
+            Error::ReqLen => spi::ErrorKind::Other,
+            Error::InvalidHexChar => spi::ErrorKind::Other,
+        }
+    }
 }
 
 impl From<std::io::Error> for Error {
@@ -53,9 +62,9 @@ impl From<Error> for u8 {
     }
 }
 
-impl From<Error> for TransportError {
+impl From<Error> for transport::Error {
     fn from(err: Error) -> Self {
-        TransportError::Other(err.into())
+        transport::Error::Other(err.into())
     }
 }
 
@@ -102,8 +111,19 @@ impl UsbDongleTransport {
         std::thread::sleep(std::time::Duration::from_millis(ms as u64));
     }
 
-    #[allow(unused)]
-    fn cs_high(&mut self) -> Result<(), Error> {
+    pub fn spi_csn_low(&mut self) -> Result<(), Error> {
+        self.port.write_all(&CS_LOW_REQ)?;
+
+        let mut resp_buf = [0u8; 4];
+        self.port.read_exact(&mut resp_buf)?;
+
+        if resp_buf != OK_RESP {
+            return Err(Error::Io(std::io::Error::other("CS low failed")));
+        }
+        Ok(())
+    }
+
+    pub fn spi_csn_high(&mut self) -> Result<(), Error> {
         self.port.write_all(&CS_HIGH_REQ)?;
 
         let mut resp_buf = [0u8; 4];
@@ -112,6 +132,25 @@ impl UsbDongleTransport {
         if resp_buf != OK_RESP {
             return Err(Error::Io(std::io::Error::other("CS high failed")));
         }
+        Ok(())
+    }
+
+    fn spi_transfer(&mut self, tx_data: &[u8], rx: &mut [u8]) -> Result<(), Error> {
+        let mut hex_chars = bytes_to_hexchars(tx_data);
+
+        let read_len = hex_chars.len() + 2;
+
+        hex_chars.push(b'\n');
+
+        self.port.write_all(&hex_chars)?;
+        let mut read_buf = vec![0; read_len];
+
+        self.delay_ms(USB_DONGLE_READ_WRITE_DELAY);
+
+        self.port.read_exact(&mut read_buf)?;
+
+        read_buf.truncate(read_buf.len() - 2);
+        hexchars_to_bytes(&read_buf, rx)?;
         Ok(())
     }
 
@@ -138,80 +177,40 @@ impl UsbDongleTransport {
     }
 }
 
-fn vec_to_padded_array<const N: usize>(vec: Vec<u8>) -> Result<[u8; N], TransportError> {
-    if vec.len() > N {
-        return Err(TransportError::InvalidDataLen);
-    }
-    let mut array = [0u8; N];
-    array[..vec.len()].copy_from_slice(&vec);
-    Ok(array)
+impl spi::ErrorType for UsbDongleTransport {
+    type Error = Error;
 }
 
-impl TropicTransport for UsbDongleTransport {
-    fn transfer_in_place(&mut self, buf: &mut [u8]) -> Result<(), TransportError> {
-        self.transfer_in_place_usb(buf, false)?;
-        Ok(())
-    }
-
-    fn write(&mut self, req: &[u8]) -> Result<(), TransportError> {
-        let mut req_buf = req.to_vec();
-        self.transfer_in_place_usb(&mut req_buf, false)?;
-        Ok(())
-    }
-
-    fn read<const N: usize>(&mut self) -> Result<Response<N>, TransportError> {
-        let mut retry = READ_MAX_TRIES;
-
-        let mut chip_status = [0_u8; 1];
-        let mut data = [0_u8; N];
-
-        self.delay_ms(USB_DONGLE_INITIAL_READ_DELAY);
-
-        while retry > 0 {
-            retry -= 1;
-            chip_status[0] = GET_RESPONSE_REQ_ID;
-            self.transfer_in_place_usb(&mut chip_status, true)?;
-            let chip_status: ChipStatus = chip_status[0].into();
-
-            if chip_status.alarm {
-                return Err(TransportError::AlarmMode);
-            }
-
-            if chip_status.ready {
-                let mut status_len = [0_u8; 2];
-                self.transfer_in_place_usb(&mut status_len, true)?;
-
-                if status_len[0] == 0xff {
-                    self.delay_ms(READ_RETRY_DELAY as u32);
-                    continue;
+impl spi::SpiDevice for UsbDongleTransport {
+    fn transaction(
+        &mut self,
+        operations: &mut [spi::Operation<'_, u8>],
+    ) -> Result<(), Self::Error> {
+        self.spi_csn_low()?;
+        for op in operations {
+            match op {
+                spi::Operation::Read(words) => {
+                    // Send zeros, receive into words
+                    let tx = vec![0u8; words.len()];
+                    self.spi_transfer(&tx, words)?;
                 }
-
-                if status_len[1] > 0 {
-                    let mut data_vec = vec![0_u8; status_len[1] as usize];
-                    self.transfer_in_place_usb(&mut data_vec, true)?;
-                    data = vec_to_padded_array(data_vec)?;
+                spi::Operation::Write(tx) => {
+                    // For pure write, transfer with dummy rx
+                    let mut dummy = vec![0u8; tx.len()];
+                    self.spi_transfer(tx, &mut dummy)?;
                 }
-
-                let mut crc = [0_u8; 2];
-                self.transfer_in_place_usb(&mut crc, false)?;
-                return Ok(Response {
-                    chip_status,
-                    status: status_len[0],
-                    len: status_len[1],
-                    data,
-                    crc,
-                });
-            } else {
-                match chip_status.chip_mode() {
-                    ChipMode::Startup => {
-                        self.delay_ms(READ_RETRY_DELAY as u32);
-                    }
-                    ChipMode::Application => {
-                        self.delay_ms(READ_RETRY_DELAY as u32);
-                    }
+                spi::Operation::Transfer(read, write) => {
+                    self.spi_transfer(write, read)?;
                 }
+                spi::Operation::TransferInPlace(buffer) => {
+                    let mut rx = vec![0u8; buffer.len()];
+                    self.spi_transfer(buffer, &mut rx)?;
+                    buffer.copy_from_slice(&rx);
+                }
+                spi::Operation::DelayNs(_ns) => {}
             }
         }
-        Err(TransportError::ChipBusy)
+        self.spi_csn_high()?;
+        Ok(())
     }
 }
