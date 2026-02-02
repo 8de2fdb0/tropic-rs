@@ -1,3 +1,6 @@
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use super::*;
 
 const GET_INFO_REQ_ID: u8 = 0x01;
@@ -128,6 +131,7 @@ pub const GET_INFO_SPECT_FW_SIZE: usize = 4;
 /// - 12 bits: Fabrication ID.
 /// - 12 bits: Part Number ID.
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SerialNumberV1 {
     pub prov_ver_fab_id_pn: [u8; 4],
     /// Provisioning date (16 bits).
@@ -179,6 +183,7 @@ impl core::fmt::Display for SerialNumberV1 {
 }
 
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SerialNumberV2 {
     /// 8 bits for serial number
     pub sn: u8,
@@ -225,6 +230,7 @@ impl From<[u8; 16]> for SerialNumberV2 {
 /// The exact copy of ﬁrst two words of MAN_FUNC_TEST structure.
 /// In case of missing, it is filled with 0x00
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ManufacturingInfo {
     /// Manufacturing level test info (128 bits), structure retrieved from test line and BP.
     pub func_test_info: [u8; 8],
@@ -276,6 +282,7 @@ impl From<[u8; 16]> for ManufacturingInfo {
 
 /// Provisioning Data version (160 bits), defined by Tropic Square for each batch in BP.
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ProvisioningData {
     /// Provisioning template version.
     pub prov_templ_ver: [u8; 2],
@@ -330,6 +337,7 @@ impl From<[u8; 20]> for ProvisioningData {
 }
 
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ChipId {
     /// CHIP_ID structure versioning (32 bits), defined by Tropic Square in BP.
     pub chip_id_ver: [u8; 4], //  [0x01_u8, 0x02, 0x03, 0x04];
@@ -473,6 +481,7 @@ pub const GET_INFO_FW_HEADER_SIZE: usize = GET_INFO_FW_HEADER_SIZE_BOOT_V2;
 /// When in MAINTENANCE mode, it is possible to read firmware header from a firmware bank. Returned data differs
 /// based on bootloader version. This header layout is returned by bootloader version v1.0.1
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FirmwareBootHeaderV1 {
     r#type: [u8; 4],
     version: [u8; 4],
@@ -485,6 +494,7 @@ pub struct FirmwareBootHeaderV1 {
 /// Returned data differs based on bootloader version.
 /// This header layout is returned by bootloader version v1.0.1
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FirmwareBootHeaderV2 {
     /// Currently only two types supported:
     /// - 1: FW for RISCV coprocessor
@@ -508,6 +518,7 @@ pub struct FirmwareBootHeaderV2 {
 }
 
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FirmwareBootHeader {
     Empty,
     V1(FirmwareBootHeaderV1),

@@ -1,5 +1,3 @@
-use embedded_hal::spi::Error as _;
-
 #[cfg(debug_assertions)]
 pub mod keys;
 
@@ -197,13 +195,8 @@ pub(crate) struct Response<const N: usize> {
     pub(crate) data: [u8; N],
 }
 
-pub(crate) fn receive<
-    SPI: embedded_hal::spi::SpiDevice,
-    D: embedded_hal::delay::DelayNs,
-    const N: usize,
->(
-    spi_device: &mut SPI,
-    delay: &mut D,
+pub(crate) fn receive<T: crate::transport::TropicTransport, const N: usize>(
+    transport: &mut T,
     session: &mut impl Session,
 ) -> Result<Response<N>, Error> {
     if N > FRAME_MAX_LEN {
@@ -211,7 +204,7 @@ pub(crate) fn receive<
     }
 
     let mut buf = [0_u8; FRAME_MAX_LEN];
-    l2::enc_session::receive(spi_device, delay, &mut buf)?;
+    l2::enc_session::receive(transport, &mut buf)?;
 
     // len = 1 byte status + data
     let len = u16::from_le_bytes(buf[..RES_SIZE_LEN].try_into().unwrap());
@@ -292,14 +285,8 @@ impl<const N: usize> Request<N> {
     }
 }
 
-pub fn send<
-    SPI: embedded_hal::spi::SpiDevice,
-    D: embedded_hal::delay::DelayNs,
-    const N: usize,
-    P: PlaintextCmd<N>,
->(
-    spi_device: &mut SPI,
-    delay: &mut D,
+pub fn send<T: crate::transport::TropicTransport, const N: usize, P: PlaintextCmd<N>>(
+    transport: &mut T,
     plaintext_cmd: P,
     session: &mut impl Session,
 ) -> Result<(), Error> {
@@ -309,19 +296,16 @@ pub fn send<
     for i in 0..enc_cmd_chunks.count {
         let is_last_chunk = i == enc_cmd_chunks.count - 1;
 
-        if is_last_chunk {
-            spi_device
-                .write(&enc_cmd_chunks.chunks[i][..enc_cmd_chunks.last_len])
-                .map_err(|err| Error::L2(l2::Error::Spi(err.kind())))?;
+        let req = if is_last_chunk {
+            &enc_cmd_chunks.chunks[i][..enc_cmd_chunks.last_len]
         } else {
-            spi_device
-                .write(&enc_cmd_chunks.chunks[i])
-                .map_err(|err| Error::L2(l2::Error::Spi(err.kind())))?;
-        }
+            &enc_cmd_chunks.chunks[i]
+        };
 
         // verify l2 resp status
-        let resp: l2::Response<{ l1::LEN_MAX }> = l1::receive(spi_device, delay)
-            .map_err(|err| Error::L2(l2::Error::L1(err)))?
+        let resp: l2::Response<{ l1::LEN_MAX }> = transport
+            .request(req)
+            .map_err(|err| Error::L2(l2::Error::Transport(err)))?
             .try_into()?;
 
         if is_last_chunk {
@@ -344,14 +328,12 @@ where
     Self: TryFrom<Response<N>>,
     <Self as TryFrom<Response<N>>>::Error: Into<Error>,
 {
-    fn receive_l3<SPI: embedded_hal::spi::SpiDevice, D: embedded_hal::delay::DelayNs>(
-        spi_device: &mut SPI,
-        delay: &mut D,
+    fn receive_l3<T: crate::transport::TropicTransport>(
+        transport: &mut T,
+
         session: &mut impl Session,
     ) -> Result<Self, Error> {
-        receive(spi_device, delay, session)?
-            .try_into()
-            .map_err(Into::into)
+        receive(transport, session)?.try_into().map_err(Into::into)
     }
 }
 
@@ -456,7 +438,7 @@ pub mod ping {
         use embedded_hal_mock::eh1::delay::CheckedDelay;
 
         use super::*;
-        use crate::l3;
+        use crate::{l3, transport::SpiDeviceTransport};
 
         #[test]
         fn test_ping_short() {
@@ -470,20 +452,18 @@ pub mod ping {
                     &[Status::Ok as u8, b'p', b'i', b'n', b'g'],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 PingCmd::create(msg).expect("failed to create command"),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let result = l3::receive(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let result = l3::receive(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to get result");
 
             let write_result: PingResp = result.into();
 
@@ -696,7 +676,7 @@ pub mod payring_key {
         use embedded_hal_mock::eh1::delay::CheckedDelay;
 
         use super::*;
-        use crate::{common, l3};
+        use crate::{common, l3, transport::SpiDeviceTransport};
 
         #[test]
         fn test_pairing_key_write() {
@@ -712,22 +692,20 @@ pub mod payring_key {
                     &[Status::Ok as u8],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             let key = [0xff_u8; 32].into();
 
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 PairingKeyWriteCmd::create(common::PairingKeySlot::Index1, &key),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let result = l3::receive(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let result = l3::receive(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to get result");
 
             let write_result: PairingKeyWriteResp = result.into();
 
@@ -753,20 +731,18 @@ pub mod payring_key {
                     &resp_data,
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 PairingKeyReadCmd::create(common::PairingKeySlot::Index1),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let result = l3::receive(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let result = l3::receive(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to get result");
 
             let read_result: PairingKeyReadResp = result.into();
 
@@ -788,20 +764,18 @@ pub mod payring_key {
                     &[Status::Ok as u8],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 PairingKeyInvalidateCmd::create(common::PairingKeySlot::Index2),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let result = l3::receive(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let result = l3::receive(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to get result");
 
             let invalidate_result: PairingKeyInvalidateResp = result.into();
 
@@ -988,7 +962,7 @@ pub mod reversable_config {
         use embedded_hal_mock::eh1::delay::CheckedDelay;
 
         use super::*;
-        use crate::{common::config::bootloader, l3};
+        use crate::{common::config::bootloader, l3, transport::SpiDeviceTransport};
 
         #[test]
         fn test_config_write() {
@@ -1000,25 +974,23 @@ pub mod reversable_config {
                     &[Status::Ok as u8],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             let addr = bootloader::StartUpRegAddr;
             let value = bootloader::StartUp::default();
 
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 ConfigWriteCmd::create(addr, value),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let result = l3::receive(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let result = l3::receive(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to get result");
 
-            let write_result: ConfigWriteResp = result.try_into().expect("failed to parse result");
+            let write_result: ConfigWriteResp = result.into();
 
             assert_eq!(write_result.status, Status::Ok);
             assert_eq!(write_result.len, R_CONFIG_WRITE_RES_LEN as u16 - 1);
@@ -1037,22 +1009,20 @@ pub mod reversable_config {
                     &[Status::Ok as u8, 0, 0, 0, 255, 255, 255, 255],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             let addr = bootloader::StartUpRegAddr;
 
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 ConfigReadCmd::create(&addr),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let result = l3::receive(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let result = l3::receive(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to get result");
 
             let read_result: ConfigReadResp<bootloader::StartUp> =
                 result.try_into().expect("failed to parse result");
@@ -1075,22 +1045,20 @@ pub mod reversable_config {
                     &[Status::Ok as u8],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 ConfigEraseCmd::create(),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let result = l3::receive(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let result = l3::receive(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to get result");
 
-            let erase_result: ConfigEraseResp = result.try_into().expect("failed to parse result");
+            let erase_result: ConfigEraseResp = result.into();
 
             assert_eq!(erase_result.status, Status::Ok);
             assert_eq!(erase_result.len, R_CONFIG_ERASE_RES_LEN as u16 - 1);
@@ -1235,7 +1203,7 @@ pub mod irreversable_config {
         use embedded_hal_mock::eh1::delay::CheckedDelay;
 
         use super::*;
-        use crate::{common::config::bootloader, l3};
+        use crate::{common::config::bootloader, l3, transport::SpiDeviceTransport};
 
         #[test]
         fn test_config_write() {
@@ -1250,22 +1218,20 @@ pub mod irreversable_config {
                     &[Status::Ok as u8],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 ConfigWriteCmd::create(&addr, bit_index),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let result = l3::receive(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let result = l3::receive(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to get result");
 
-            let write_result: ConfigWriteResp = result.try_into().expect("failed to parse result");
+            let write_result: ConfigWriteResp = result.into();
 
             assert_eq!(write_result.status, Status::Ok);
             assert_eq!(write_result.len, I_CONFIG_WRITE_RES_LEN as u16 - 1);
@@ -1284,22 +1250,20 @@ pub mod irreversable_config {
                     &[Status::Ok as u8, 0, 0, 0, 255, 255, 255, 255],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             let addr = bootloader::SensorRegAddr;
 
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 ConfigReadCmd::create(&addr),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let result = l3::receive(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let result = l3::receive(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to get result");
 
             let read_result: ConfigReadResp<bootloader::StartUp> =
                 result.try_into().expect("failed to parse result");
@@ -1491,7 +1455,7 @@ pub mod r_mem_data {
         use embedded_hal_mock::eh1::delay::CheckedDelay;
 
         use super::*;
-        use crate::{common::UserDataSlot, l3};
+        use crate::{common::UserDataSlot, l3, transport::SpiDeviceTransport};
 
         #[test]
         fn test_mem_data_write_cmd() {
@@ -1510,24 +1474,21 @@ pub mod r_mem_data {
                     &[Status::Ok as u8],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 RMemDataWriteCmd::create(user_data_slot, &user_data)
                     .expect("failed to create command"),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let result = l3::receive(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let result = l3::receive(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to get result");
 
-            let write_result: RMemDataWriteResp =
-                result.try_into().expect("failed to parse result");
+            let write_result: RMemDataWriteResp = result.into();
 
             assert_eq!(write_result.status, Status::Ok);
             assert_eq!(write_result.len, RES_STATUS_LEN as u16 - 1);
@@ -1550,20 +1511,18 @@ pub mod r_mem_data {
                     &[Status::Ok as u8, 0, 0, 0, 255, 255, 255, 255, 251, 251, 251],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 RMemDataReadCmd::create(user_data_slot),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let result = l3::receive(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let result = l3::receive(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to get result");
 
             let read_result: RMemDataReadResp = result.try_into().expect("failed to parse result");
 
@@ -1591,22 +1550,20 @@ pub mod r_mem_data {
                     &exp_req,
                     &[Status::Ok as u8],
                 );
+
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 RMemDataEraseCmd::create(user_data_slot),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let result = l3::receive(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
-            let erase_result: RMemDataEraseResp =
-                result.try_into().expect("failed to parse result");
+            let result = l3::receive(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to get result");
+            let erase_result: RMemDataEraseResp = result.into();
             assert_eq!(erase_result.status, Status::Ok);
             assert_eq!(erase_result.len, RES_STATUS_LEN as u16 - 1);
 
@@ -1652,18 +1609,6 @@ pub mod random {
                     Ok(Self { data })
                 }
             }
-
-            // if n_bytes == 0 || n_bytes > RANDOM_VALUE_GET_LEN_MAX as u8 {
-            //     return Err(Error::RandomValueMax);
-            // }
-            // if n_bytes > RANDOM_VALUE_GET_LEN_MAX as u8 {
-            //     return Err(Error::RandomValueMax);
-            // }
-
-            // let mut data = [0_u8; RANDOM_VALUE_GET_CMD_LEN];
-            // data[0] = RANDOM_VALUE_GET_CMD_ID;
-            // data[1] = n_bytes;
-            // Self { data }
         }
     }
 
@@ -1716,7 +1661,7 @@ pub mod random {
         use embedded_hal_mock::eh1::delay::CheckedDelay;
 
         use super::*;
-        use crate::l3;
+        use crate::{l3, transport::SpiDeviceTransport};
 
         #[test]
         fn test_random_value_get() {
@@ -1733,20 +1678,19 @@ pub mod random {
                     &resp_data,
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 RandomValueGetCmd::create(32).expect("failed to create command"),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let read_result = RandomValueGetResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let read_result =
+                RandomValueGetResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to get result");
 
             assert_eq!(read_result.status, Status::Ok);
             assert_eq!(read_result.len, 32);
@@ -1960,7 +1904,7 @@ pub mod ecc_key {
         use embedded_hal_mock::eh1::delay::CheckedDelay;
 
         use super::*;
-        use crate::l3;
+        use crate::{l3, transport::SpiDeviceTransport};
 
         #[test]
         fn test_ecc_key_generate_ed25519() {
@@ -1977,23 +1921,22 @@ pub mod ecc_key {
                     &[Status::Ok as u8],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             let ecc_key_slot = 1_u16.try_into().expect("failed to create ecc key slot");
             let curve = common::ecc::EccCurve::Ed25519;
 
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 EccKeyGenerateCmd::create(ecc_key_slot, curve),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let generate_result = EccKeyGenerateResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to get result");
+            let generate_result =
+                EccKeyGenerateResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to get result");
 
             assert_eq!(generate_result.status, Status::Ok);
             assert_eq!(generate_result.len, ECC_KEY_GENERATE_RES_LEN as u16 - 1);
@@ -2015,22 +1958,22 @@ pub mod ecc_key {
                     ],
                     &[Status::Ok as u8],
                 );
+
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             let ecc_key_slot = 31_u16.try_into().expect("failed to create ecc key slot");
             let curve = common::ecc::EccCurve::P256;
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 EccKeyGenerateCmd::create(ecc_key_slot, curve),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let generate_result = EccKeyGenerateResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let generate_result =
+                EccKeyGenerateResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to parse result");
             assert_eq!(generate_result.status, Status::Ok);
             assert_eq!(generate_result.len, ECC_KEY_GENERATE_RES_LEN as u16 - 1);
             mocked_delay.done();
@@ -2057,23 +2000,23 @@ pub mod ecc_key {
                     &exp_req,
                     &[Status::Ok as u8],
                 );
+
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             let ecc_key_slot = 2_u16.try_into().expect("failed to create ecc key slot");
             let curve = common::ecc::EccCurve::Ed25519;
 
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 EccKeyStoreCmd::create(ecc_key_slot, curve, &secret_key),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let store_result = EccKeyStoreResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let store_result =
+                EccKeyStoreResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to parse result");
             assert_eq!(store_result.status, Status::Ok);
             assert_eq!(store_result.len, ECC_KEY_STORE_RES_LEN as u16 - 1);
             mocked_delay.done();
@@ -2100,23 +2043,23 @@ pub mod ecc_key {
                     &exp_req,
                     &[Status::Ok as u8],
                 );
+
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             let ecc_key_slot = 31_u16.try_into().expect("failed to create ecc key slot");
             let curve = common::ecc::EccCurve::P256;
 
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 EccKeyStoreCmd::create(ecc_key_slot, curve, &secret_key),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let store_result = EccKeyStoreResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let store_result =
+                EccKeyStoreResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to parse result");
             assert_eq!(store_result.status, Status::Ok);
             assert_eq!(store_result.len, ECC_KEY_STORE_RES_LEN as u16 - 1);
             mocked_delay.done();
@@ -2140,21 +2083,22 @@ pub mod ecc_key {
                     &[ECC_KEY_READ_CMD_ID, 2, 0],
                     &resp_data,
                 );
+
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             let ecc_key_slot = 2_u16.try_into().expect("failed to create ecc key slot");
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 EccKeyReadCmd::create(ecc_key_slot),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let read_result = EccKeyReadResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let read_result =
+                EccKeyReadResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to parse result");
 
             assert_eq!(read_result.status, Status::Ok);
             assert_eq!(read_result.len, resp_data.len() as u16 - 1);
@@ -2178,26 +2122,28 @@ pub mod ecc_key {
             .to_vec();
             resp_data.extend_from_slice(&[0_u8; 13]);
             resp_data.extend_from_slice(&pubkey);
+
             let (mut mocked_spi_device, mut mocked_session) =
                 super::super::tests::get_mocked_spi_device_and_session(
                     &[ECC_KEY_READ_CMD_ID, 31, 0],
                     &resp_data,
                 );
+
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             let ecc_key_slot = 31_u16.try_into().expect("failed to create ecc key slot");
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 EccKeyReadCmd::create(ecc_key_slot),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let read_result = EccKeyReadResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let read_result =
+                EccKeyReadResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to parse result");
             assert_eq!(read_result.status, Status::Ok);
             assert_eq!(read_result.len, resp_data.len() as u16 - 1);
             assert_eq!(read_result.curve, common::ecc::EccCurve::P256);
@@ -2215,21 +2161,22 @@ pub mod ecc_key {
                     &[ECC_KEY_ERASE_CMD_ID, 2, 0],
                     &[Status::Ok as u8],
                 );
+
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             let ecc_key_slot = 2_u16.try_into().expect("failed to create ecc key slot");
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 EccKeyEraseCmd::create(ecc_key_slot),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let read_result = EccKeyEraseResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let read_result =
+                EccKeyEraseResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to parse result");
             assert_eq!(read_result.status, Status::Ok);
             assert_eq!(read_result.len, ECC_KEY_ERASE_RES_LEN as u16 - 1);
             mocked_delay.done();
@@ -2366,7 +2313,7 @@ pub mod ecc_sign {
         use embedded_hal_mock::eh1::delay::CheckedDelay;
 
         use super::*;
-        use crate::l3;
+        use crate::{l3, transport::SpiDeviceTransport};
 
         #[test]
         fn test_ecdsa_sign() {
@@ -2389,20 +2336,18 @@ pub mod ecc_sign {
             let (mut mocked_spi_device, mut mocked_session) =
                 super::super::tests::get_mocked_spi_device_and_session(&exp_req, &resp_data);
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 EcdsaSignCmd::create(ecc_key_slot, &digest),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let sign_result = EcdsaSignResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let sign_result = EcdsaSignResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to parse result");
             assert_eq!(sign_result.status, Status::Ok);
             assert_eq!(sign_result.len, ECDSA_SIGN_RES_LEN as u16 - 1);
             assert_eq!(sign_result.sig_r, [0xAA_u8; 32]);
@@ -2431,20 +2376,19 @@ pub mod ecc_sign {
 
             let (mut mocked_spi_device, mut mocked_session) =
                 super::super::tests::get_mocked_spi_device_and_session(&exp_req, &resp_data);
+
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 EddsaSignCmd::create(ecc_key_slot, &digest).expect("failed to create cmd"),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let sign_result = EddsaSignResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let sign_result = EddsaSignResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                .expect("failed to parse result");
             assert_eq!(sign_result.status, Status::Ok);
             assert_eq!(sign_result.len, ECDSA_SIGN_RES_LEN as u16 - 1);
             assert_eq!(sign_result.sig_r, [0xAA_u8; 32]);
@@ -2629,7 +2573,7 @@ pub mod mcounter {
         use embedded_hal_mock::eh1::delay::CheckedDelay;
 
         use super::*;
-        use crate::l3;
+        use crate::{l3, transport::SpiDeviceTransport};
 
         #[test]
         fn test_mcounter_init() {
@@ -2650,20 +2594,19 @@ pub mod mcounter {
                     &[Status::Ok as u8],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 MCounterInitCmd::create(mcounter_index, value),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let init_result = MCounterInitResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let init_result =
+                MCounterInitResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to parse result");
             assert_eq!(init_result.status, Status::Ok);
             assert_eq!(init_result.len, MCOUNTER_INIT_RES_LEN as u16 - 1);
             mocked_delay.done();
@@ -2677,26 +2620,26 @@ pub mod mcounter {
             let mcounter_index = common::MCounterIndex::random();
             let mut exp_req = [MCOUNTER_UPDATE_CMD_ID].to_vec();
             exp_req.extend_from_slice(&Into::<[u8; 2]>::into(mcounter_index.clone()));
+
             let (mut mocked_spi_device, mut mocked_session) =
                 super::super::tests::get_mocked_spi_device_and_session(
                     &exp_req,
                     &[Status::Ok as u8],
                 );
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 MCounterUpdateCmd::create(mcounter_index),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let update_result = MCounterUpdateResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let update_result =
+                MCounterUpdateResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to parse result");
             assert_eq!(update_result.status, Status::Ok);
             assert_eq!(update_result.len, MCOUNTER_UPDATE_RES_LEN as u16 - 1);
             mocked_delay.done();
@@ -2720,20 +2663,19 @@ pub mod mcounter {
             let (mut mocked_spi_device, mut mocked_session) =
                 super::super::tests::get_mocked_spi_device_and_session(&exp_req, &resp_data);
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 MCounterGetCmd::create(mcounter_index),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let get_result = MCounterGetResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let get_result =
+                MCounterGetResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to parse result");
             assert_eq!(get_result.status, Status::Ok);
             assert_eq!(get_result.len, MCOUNTER_GET_RES_LEN as u16 - 1);
             assert_eq!(get_result.mcounter, mcounter_value);
@@ -2811,7 +2753,7 @@ pub mod mac_and_destroy {
         use embedded_hal_mock::eh1::delay::CheckedDelay;
 
         use super::*;
-        use crate::l3;
+        use crate::{l3, transport::SpiDeviceTransport};
 
         #[test]
         fn test_mac_and_destroy() {
@@ -2834,20 +2776,19 @@ pub mod mac_and_destroy {
             let (mut mocked_spi_device, mut mocked_session) =
                 super::super::tests::get_mocked_spi_device_and_session(&exp_req, &resp_data);
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 MacAndDestroyCmd::create(&mac_and_destroy_slot, &data_in),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let mac_result = MacAndDestroyResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let mac_result =
+                MacAndDestroyResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to parse result");
             assert_eq!(mac_result.status, Status::Ok);
             assert_eq!(mac_result.len, MAC_AND_DESTROY_RES_LEN as u16 - 1);
             assert_eq!(mac_result.data_out, [0xAA_u8; 32]);
@@ -2917,7 +2858,7 @@ pub mod serial_code {
         use embedded_hal_mock::eh1::delay::CheckedDelay;
 
         use super::*;
-        use crate::l3;
+        use crate::{l3, transport::SpiDeviceTransport};
 
         #[test]
         fn test_get_serial() {
@@ -2933,20 +2874,19 @@ pub mod serial_code {
             let (mut mocked_spi_device, mut mocked_session) =
                 super::super::tests::get_mocked_spi_device_and_session(&exp_req, &resp_data);
 
+            let mut mocked_transport =
+                SpiDeviceTransport::new(mocked_spi_device.clone(), mocked_delay.clone());
+
             l3::send(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
+                &mut mocked_transport,
                 GetSerialCodeCmd::create(),
                 &mut mocked_session,
             )
             .expect("failed to send command");
 
-            let serial_result = GetSerialCodeResp::receive_l3(
-                &mut mocked_spi_device,
-                &mut mocked_delay,
-                &mut mocked_session,
-            )
-            .expect("failed to parse result");
+            let serial_result =
+                GetSerialCodeResp::receive_l3(&mut mocked_transport, &mut mocked_session)
+                    .expect("failed to parse result");
             assert_eq!(serial_result.status, Status::Ok);
             assert_eq!(serial_result.len, GET_SERIAL_RES_LEN as u16 - 1);
             assert_eq!(serial_result.serial_code, [0xAA_u8; 32]);
@@ -3005,7 +2945,7 @@ pub mod tests {
         let mut exp_l2_req = [4].to_vec();
         exp_l2_req.push((exp_l3_payload.len() + CMD_SIZE_LEN + TAG_LEN) as u8);
         exp_l2_req.extend_from_slice(&l3_cmd_len.to_le_bytes());
-        exp_l2_req.extend_from_slice(&exp_l3_payload);
+        exp_l2_req.extend_from_slice(exp_l3_payload);
         exp_l2_req.extend_from_slice(&SESSION_ENC_TAG);
         exp_l2_req.extend_from_slice(&[0, 0]);
         crc16::add_crc(&mut exp_l2_req).expect("failed to add crc to request");

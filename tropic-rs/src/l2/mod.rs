@@ -1,5 +1,3 @@
-// mod x509_parser;
-
 pub(crate) mod cert;
 pub(crate) mod cert_store;
 pub mod info;
@@ -31,9 +29,8 @@ pub(crate) const L2_MAX_FRAME_SIZE: usize =
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    Spi(embedded_hal::spi::ErrorKind),
+    Transport(crate::transport::Error),
     Crc(crate::crc16::Error),
-    L1(crate::l1::Error),
     InvalidCRC,
     InvalidStatus(u8),
     RespErr(Status),
@@ -54,9 +51,8 @@ pub enum Error {
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Spi(err) => f.write_fmt(format_args!("spi error: {}", err)),
+            Self::Transport(err) => f.write_fmt(format_args!("transport error: {}", err)),
             Self::Crc(err) => f.write_fmt(format_args!("crc error: {}", err)),
-            Self::L1(err) => f.write_fmt(format_args!("l1 error: {}", err)),
             Self::InvalidCRC => f.write_fmt(format_args!("l2: invalid crc")),
             Self::EncCmdReqSize(exp, act) => f.write_fmt(format_args!(
                 "l2: invalid encrypted command length: expected {} bytes, got {}",
@@ -98,9 +94,9 @@ impl core::fmt::Display for Error {
     }
 }
 
-impl<E: embedded_hal::spi::Error> From<E> for Error {
-    fn from(err: E) -> Self {
-        Self::Spi(err.kind())
+impl From<crate::transport::Error> for Error {
+    fn from(err: crate::transport::Error) -> Self {
+        Self::Transport(err)
     }
 }
 
@@ -110,9 +106,9 @@ impl From<crate::crc16::Error> for Error {
     }
 }
 
-impl From<crate::l1::Error> for Error {
-    fn from(err: crate::l1::Error) -> Self {
-        Self::L1(err)
+impl From<core::convert::Infallible> for Error {
+    fn from(_: core::convert::Infallible) -> Self {
+        unreachable!()
     }
 }
 
@@ -230,15 +226,10 @@ impl<const N: usize> TryFrom<l1::Response<N>> for Response<N> {
     }
 }
 
-pub(crate) fn receive<
-    SPI: embedded_hal::spi::SpiDevice,
-    D: embedded_hal::delay::DelayNs,
-    const N: usize,
->(
-    spi_device: &mut SPI,
-    delay: &mut D,
+pub(crate) fn receive<T: crate::transport::TropicTransport, const N: usize>(
+    transport: &mut T,
 ) -> Result<Response<N>, Error> {
-    l1::receive(spi_device, delay)?.try_into()
+    transport.read()?.try_into()
 }
 
 mod sealed {
@@ -250,11 +241,11 @@ where
     Self: TryFrom<Response<N>>,
     <Self as TryFrom<Response<N>>>::Error: Into<Error>,
 {
-    fn receive_l2<SPI: embedded_hal::spi::SpiDevice, D: embedded_hal::delay::DelayNs>(
-        spi_device: &mut SPI,
-        delay: &mut D,
+    fn receive_l2<T: crate::transport::TropicTransport>(
+        transport: &mut T,
+        req: &[u8],
     ) -> Result<Self, Error> {
-        let resp: Response<N> = l1::receive(spi_device, delay)?.try_into()?;
+        let resp: Response<N> = transport.request(req)?.try_into()?;
         let item = Self::try_from(resp).map_err(Into::into)?;
         Ok(item)
     }
@@ -621,13 +612,9 @@ pub mod enc_session {
         }
     }
 
-    pub(crate) fn receive<
-        SPI: embedded_hal::spi::SpiDevice,
-        D: embedded_hal::delay::DelayNs,
-        const N: usize,
-    >(
-        spi_device: &mut SPI,
-        delay: &mut D,
+    pub(crate) fn receive<T: crate::transport::TropicTransport, const N: usize>(
+        transport: &mut T,
+
         buff: &mut [u8; N],
     ) -> Result<(), Error> {
         let mut offset: usize = 0;
@@ -640,7 +627,7 @@ pub mod enc_session {
                 return Err(Error::RespMaxLoops);
             }
 
-            let resp: EncryptedCmdResp = super::receive(spi_device, delay)?.into();
+            let resp: EncryptedCmdResp = super::receive(transport)?.into();
 
             if buff.len() < offset + resp.len as usize {
                 // make sure buff is large enough
@@ -1246,7 +1233,7 @@ pub mod mutable_firmware {
                     UPDATE_DATA_MAX_CHUNK_LEN as u8;
                 data[UPDATE_REQ_LEN + (3 * (UPDATE_DATA_MAX_CHUNK_LEN + 1)) + 1] =
                     UPDATE_DATA_MAX_CHUNK_LEN as u8;
-                data[UPDATE_REQ_LEN + (4 * (UPDATE_DATA_MAX_CHUNK_LEN + 1)) + 1] = 120 as u8;
+                data[UPDATE_REQ_LEN + (4 * (UPDATE_DATA_MAX_CHUNK_LEN + 1)) + 1] = 120_u8;
 
                 let update_data_req =
                     UpdateDataReq::create(&data).expect("failed to create update data request");

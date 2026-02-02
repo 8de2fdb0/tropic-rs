@@ -77,7 +77,7 @@ fn check_pin(
     let pin_decrypted = xor_cyphertext(ciphertext, &k_i);
 
     info!("Computing t' = KDF(s, \"0\")...");
-    let t_prime = hmac_sha256(&pin_decrypted, &[b'0']);
+    let t_prime = hmac_sha256(&pin_decrypted, b"0");
     info!("Checking t == t'...");
     if t != &t_prime {
         return Err(Error::InvalidPin);
@@ -122,10 +122,10 @@ fn test_l3_mac_and_destroy() {
     let pin = rand_bytes(pin_len);
 
     info!("Computing t = KDF(s, \"0\")...");
-    let t = hmac_sha256(&s, &[b'0']);
+    let t = hmac_sha256(&s, b"0");
 
     info!("Computing u = KDF(s, \"1\")...");
-    let u = hmac_sha256(&s, &[b'1']);
+    let u = hmac_sha256(&s, b"1");
 
     info!("Computing v = KDF(0, PIN_DATA)...");
     let v = hmac_sha256(&KDF_KEY_ZEROS, &pin);
@@ -156,7 +156,7 @@ fn test_l3_mac_and_destroy() {
         ciphertexts[i as usize] = xor_cyphertext(&s, &k_i);
     }
 
-    let k_from_setup = hmac_sha256(&s, &[b'2']);
+    let k_from_setup = hmac_sha256(&s, b"2");
 
     info!(
         "Generating a random number of wrong attempts from {{0...{}}}...",
@@ -196,12 +196,12 @@ fn test_l3_mac_and_destroy() {
     .expect("failed to check PIN");
 
     info!("Comparing cryptographic key k to the one from the setup phase...");
-    let k_from_check = hmac_sha256(&s, &[b'2']);
+    let k_from_check = hmac_sha256(&s, b"2");
     assert_eq!(k_from_setup, k_from_check);
 
     info!("Starting a restoration of destroyed slots");
     info!("Computing u = KDF(s, \"1\")...");
-    let u = hmac_sha256(&s, &[b'1']);
+    let u = hmac_sha256(&s, b"1");
 
     for i in 0..=wrong_attempts {
         info!("Restoring slot #{}...", i);
@@ -224,7 +224,7 @@ fn test_l3_mac_and_destroy() {
         .expect("failed to check PIN");
 
         info!("Comparing cryptographic key k to the one from the setup phase...");
-        let k_from_check = hmac_sha256(&s_check, &[b'2']);
+        let k_from_check = hmac_sha256(&s_check, b"2");
         assert_eq!(k_from_setup, k_from_check);
     }
 

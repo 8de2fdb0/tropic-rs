@@ -5,6 +5,7 @@
             "type": "probe-rs-debug",
             "request": "launch",
             "name": "probe-rs tropic_ushell",
+            "runtimeExecutable": "~/.cargo/bin/probe-rs",
             "cwd": "${workspaceFolder}",
             // "connectUnderReset": false,
             // "core": "cortex-m33",
@@ -21,5 +22,47 @@
                 }
             ]
         },
+        {
+            "name": "lldb usb_dongle status",
+            "cwd": "${workspaceFolder}/tropic-examples/usb_dongle",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--manifest-path", "${workspaceFolder}/tropic-examples/usb_dongle/Cargo.toml", 
+                    "--bin", "tropic-usb-dongle"]
+            },
+            "args": ["-d", "/dev/ttyACM0", "status"],
+            "program": "${cargo:program}"
+        },
+        {
+            "name": "lldb usb_dongle fw-boot-header fw-bank-fw2",
+            "cwd": "${workspaceFolder}/tropic-examples/usb_dongle",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--manifest-path", "${workspaceFolder}/tropic-examples/usb_dongle/Cargo.toml",
+                    "--bin", "tropic-usb-dongle"]
+            },
+            "args": ["-d", "/dev/ttyACM0", "fw-boot-header", "fw-bank-fw2"],
+            "program": "${cargo:program}"
+        },
+          {
+            "name": "lldb usb_dongle session create",
+            "cwd": "${workspaceFolder}/tropic-examples/usb_dongle",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--manifest-path", "${workspaceFolder}/tropic-examples/usb_dongle/Cargo.toml",
+                    "--bin", "tropic-usb-dongle"]
+            },
+            "args": ["-d", "/dev/ttyACM0", "session", "create"],
+            "program": "${cargo:program}"
+        }
     ]
 }

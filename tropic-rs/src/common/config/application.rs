@@ -4,11 +4,14 @@ use core::default;
 
 use bitfields::bitfield;
 use bitflag_attr::bitflag;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use super::*;
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Gpo {
     #[bits(2, default = 0x3)]
     gpu_func: u8,
@@ -25,6 +28,7 @@ impl core::fmt::Display for Gpo {
 
 #[bitflag(u32)]
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SleepMode {
     Enabled = 1,
 }
@@ -49,6 +53,7 @@ implement_register_traits_for_bitfield!(GpoRegAddr, Gpo, 0x14, 0x0);
 implement_register_addr_trait!(SleepModeRegAddr, SleepMode, 0x18, 0x0);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Application {
     pub gpo: Gpo,
     pub sleep_mode: SleepMode,

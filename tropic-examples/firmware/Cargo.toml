@@ -11,6 +11,9 @@ path = "src/bin/rtic_usb_api_wip.rs"
 name = "tropic_ushell"
 path = "src/bin/tropic_ushell.rs"
 
+[lib]
+test = false # disable test builds
+
 [dependencies]
 tropic-rs = { path = "../../tropic-rs", features = ["display"] }
 tropic-cert-store = { path = "../../tropic-cert-store", default-features = false, features = [

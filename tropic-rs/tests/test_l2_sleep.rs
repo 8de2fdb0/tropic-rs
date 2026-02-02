@@ -30,7 +30,7 @@ fn test_l2_sleep() {
         .expect("failed to sleep");
 
     info!("Verifying we are not in Secure Session...");
-    let result = tropic_01.ping(&mut session, &[b't', b'e', b's', b't']);
+    let result = tropic_01.ping(&mut session, b"test");
 
     assert!(result.is_err());
     assert_eq!(

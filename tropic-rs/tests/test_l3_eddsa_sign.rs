@@ -24,7 +24,7 @@ fn eddsa_verify(
     signature: &[u8],
 ) -> Result<bool, ed25519_dalek_fiat::SignatureError> {
     let verifying_key = PublicKey::from_bytes(pubkey)?;
-    let signature = Signature::from_bytes(signature.into())?;
+    let signature = Signature::from_bytes(signature)?;
 
     Ok(verifying_key.verify(message, &signature).is_ok())
 }

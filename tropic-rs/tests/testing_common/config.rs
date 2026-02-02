@@ -33,7 +33,7 @@ pub fn generate_random_config() -> config::Config {
             ecc_key_read: config::application_uap::EccKeyRead::from_bits(rand::random()),
             ecc_key_erase: config::application_uap::EccKeyErase::from_bits(rand::random()),
             ecdsa_sign: config::application_uap::EcdsaSign::from_bits(rand::random()),
-            eddsa_sifn: config::application_uap::EddsaSign::from_bits(rand::random()),
+            eddsa_sign: config::application_uap::EddsaSign::from_bits(rand::random()),
             mcounter_init: config::application_uap::McounterInit::from_bits(rand::random()),
             mcounter_get: config::application_uap::McounterGet::from_bits(rand::random()),
             mcounter_update: config::application_uap::McounterUpdate::from_bits(rand::random()),

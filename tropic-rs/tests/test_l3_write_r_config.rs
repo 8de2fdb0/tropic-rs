@@ -72,7 +72,7 @@ fn test_l3_write_r_config() {
     let r_config_backup = tropic_01
         .r_config_read(&mut session)
         .expect("failed to read r config");
-    info!("Backed up r config: {:#}", r_config_backup);
+    info!("Backed up r config: {:#?}", r_config_backup);
 
     let mut cleanup_guard =
         CleanupGuard::new(tropic_01, session, |t, s| cleanup(t, s, r_config_backup));

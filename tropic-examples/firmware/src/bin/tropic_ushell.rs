@@ -29,7 +29,8 @@ use defmt_rtt as _; // Import this to link the RTT logger
 use panic_probe as _; // The panic handler for defmt
 
 use tropic_rs::{
-    common::config::{Debug, Sensor, StartUp},
+    common::config::bootloader::{DebugRegAddr, SensorRegAddr, StartUpRegAddr},
+    transport::SpiDeviceTransport,
     Tropic01,
 };
 
@@ -43,36 +44,38 @@ type UsbUshell<'a> = ushell::UShell<
     CMD_LEN,
 >;
 type TropicInst<'a> = Tropic01<
-    embedded_hal_bus::spi::ExclusiveDevice<
-        rp235x_hal::Spi<
-            rp235x_hal::spi::Enabled,
-            rp235x_hal::pac::SPI0,
-            (
-                rp235x_hal::gpio::Pin<
-                    rp235x_hal::gpio::bank0::Gpio19,
-                    rp235x_hal::gpio::FunctionSpi,
-                    rp235x_hal::gpio::PullDown,
-                >,
-                rp235x_hal::gpio::Pin<
-                    rp235x_hal::gpio::bank0::Gpio16,
-                    rp235x_hal::gpio::FunctionSpi,
-                    rp235x_hal::gpio::PullDown,
-                >,
-                rp235x_hal::gpio::Pin<
-                    rp235x_hal::gpio::bank0::Gpio18,
-                    rp235x_hal::gpio::FunctionSpi,
-                    rp235x_hal::gpio::PullDown,
-                >,
-            ),
-        >,
-        &'a mut rp235x_hal::gpio::Pin<
-            rp235x_hal::gpio::bank0::Gpio17,
-            rp235x_hal::gpio::FunctionSio<rp235x_hal::gpio::SioOutput>,
-            rp235x_hal::gpio::PullDown,
+    SpiDeviceTransport<
+        embedded_hal_bus::spi::ExclusiveDevice<
+            rp235x_hal::Spi<
+                rp235x_hal::spi::Enabled,
+                rp235x_hal::pac::SPI0,
+                (
+                    rp235x_hal::gpio::Pin<
+                        rp235x_hal::gpio::bank0::Gpio19,
+                        rp235x_hal::gpio::FunctionSpi,
+                        rp235x_hal::gpio::PullDown,
+                    >,
+                    rp235x_hal::gpio::Pin<
+                        rp235x_hal::gpio::bank0::Gpio16,
+                        rp235x_hal::gpio::FunctionSpi,
+                        rp235x_hal::gpio::PullDown,
+                    >,
+                    rp235x_hal::gpio::Pin<
+                        rp235x_hal::gpio::bank0::Gpio18,
+                        rp235x_hal::gpio::FunctionSpi,
+                        rp235x_hal::gpio::PullDown,
+                    >,
+                ),
+            >,
+            &'a mut rp235x_hal::gpio::Pin<
+                rp235x_hal::gpio::bank0::Gpio17,
+                rp235x_hal::gpio::FunctionSio<rp235x_hal::gpio::SioOutput>,
+                rp235x_hal::gpio::PullDown,
+            >,
+            rp235x_hal::Timer<rp235x_hal::timer::CopyableTimer0>,
         >,
         rp235x_hal::Timer<rp235x_hal::timer::CopyableTimer0>,
     >,
-    rp235x_hal::Timer<rp235x_hal::timer::CopyableTimer0>,
     tropic_cert_store::nom_decoder::NomDecoder,
 >;
 type TropicCertStore<'a> =
@@ -228,8 +231,9 @@ fn main() -> ! {
         embedded_hal_bus::spi::ExclusiveDevice::new(spi_bus, &mut cs_pin, timer).unwrap();
 
     info!("setting up tropci_01");
-    let mut tropci_01 =
-        Tropic01::<_, _, tropic_cert_store::nom_decoder::NomDecoder>::new(spi_device, timer);
+    let mut tropci_01 = Tropic01::<_, tropic_cert_store::nom_decoder::NomDecoder>::new(
+        SpiDeviceTransport::new(spi_device, timer),
+    );
 
     // Create a USB device with a fake VID and PID
     let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
@@ -245,7 +249,7 @@ fn main() -> ! {
 
     let mut ping_cnt = 0;
 
-    let mut cert_buf = [0_u8; tropic_rs::l2::CERT_BUFFER_LEN];
+    let mut cert_buf = [0_u8; tropic_rs::cert_store::CERT_BUFFER_LEN];
     let mut cert_store_opt = None;
     let mut session_opt = None;
 
@@ -544,7 +548,7 @@ fn handle_tropic_chip_id(shell: &mut UsbUshell, tropci_01: &mut TropicInst) -> R
 fn handle_tropic_cert_store<'a>(
     shell: &mut UsbUshell,
     tropci_01: &mut TropicInst,
-    cert_buf: &'a mut [u8; tropic_rs::l2::CERT_BUFFER_LEN],
+    cert_buf: &'a mut [u8; tropic_rs::cert_store::CERT_BUFFER_LEN],
     cert_store_opt: &mut Option<TropicCertStore<'a>>,
 ) -> Result<(), Error> {
     *cert_store_opt = None;
@@ -555,7 +559,9 @@ fn handle_tropic_cert_store<'a>(
 }
 
 fn handle_tropic_riscv_fw(shell: &mut UsbUshell, tropci_01: &mut TropicInst) -> Result<(), Error> {
-    let version = tropci_01.get_riscv_firmware_version()?;
+    let version = tropci_01
+        .get_firmware_version(tropic_rs::l2::info::FirmwareType::Riscv)?
+        .version;
     write!(
         shell,
         "{0:}tropic riscv firmware version: {version:?}{0:}",
@@ -566,7 +572,9 @@ fn handle_tropic_riscv_fw(shell: &mut UsbUshell, tropci_01: &mut TropicInst) -> 
 }
 
 fn handle_tropic_spect_fw(shell: &mut UsbUshell, tropci_01: &mut TropicInst) -> Result<(), Error> {
-    let version = tropci_01.get_spect_firmware_version()?;
+    let version = tropci_01
+        .get_firmware_version(tropic_rs::l2::info::FirmwareType::Spect)?
+        .version;
     write!(
         shell,
         "{0:}tropic spect firmware version: {version:?}{0:}",
@@ -598,8 +606,8 @@ fn handle_tropic_restart(
     args: heapless::String<CMD_LEN>,
 ) -> Result<(), Error> {
     let mode = match args.as_str() {
-        "0" => tropic_rs::l2::restart::RestartMode::Reboot,
-        "1" => tropic_rs::l2::restart::RestartMode::Maintanance,
+        "0" => tropic_rs::l2::startup::RestartMode::Reboot,
+        "1" => tropic_rs::l2::startup::RestartMode::Maintanance,
         "" => return Err(Error::ArgMissing),
         _ => return Err(Error::WrongArg),
     };
@@ -708,15 +716,15 @@ fn handle_tropic_config_read(
 
     match args.as_str() {
         "start-up" => {
-            let resp = tropci_01.config_read(session, StartUp)?;
+            let resp = tropci_01.r_config_read_value(session, &StartUpRegAddr)?;
             write!(shell, "{0:}config_read: {resp}{0:}", USHELL_CR)?;
         }
         "sensors" => {
-            let resp = tropci_01.config_read(session, Sensor)?;
+            let resp = tropci_01.r_config_read_value(session, &SensorRegAddr)?;
             write!(shell, "{0:}config_read: {resp}{0:}", USHELL_CR)?;
         }
         "debug" => {
-            let resp = tropci_01.config_read(session, Debug)?;
+            let resp = tropci_01.r_config_read_value(session, &DebugRegAddr)?;
             write!(shell, "{0:}config_read: {resp}{0:}", USHELL_CR)?;
         }
         "" => return Err(Error::ArgMissing),

@@ -1,12 +1,14 @@
 //! Bootloader Config Registers
-
 use bitflag_attr::bitflag;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use super::*;
 
 /// CFG_START_UP register fields
 #[bitflag(u32)]
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum StartUp {
     Rfu1 = 1,
     Mbist = 1 << 1,
@@ -48,6 +50,7 @@ impl core::fmt::Display for StartUp {
 /// CFG_SENSORS register fields
 #[bitflag(u32)]
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Sensor {
     Ptrng0TestDisabled = 1,
     Ptrng1TestDisabled = 1 << 1,
@@ -129,6 +132,7 @@ impl core::fmt::Display for Sensor {
 /// CFG_DEBUG register fields
 #[bitflag(u32)]
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Debug {
     FwDebugLogEnabled = 1,
 }
@@ -162,6 +166,7 @@ implement_register_addr_trait!(SensorRegAddr, Sensor, 0x8, 0x0);
 implement_register_addr_trait!(DebugRegAddr, Debug, 0x10, 0x0);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Bootloader {
     pub start_up: StartUp,
     pub sensor: Sensor,

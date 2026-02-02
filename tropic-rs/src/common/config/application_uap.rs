@@ -1,6 +1,8 @@
 //! User Access Privileges Configuration Registers
 
 use bitfields::bitfield;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use super::access_flag::AccessFlag;
 use super::*;
@@ -9,6 +11,7 @@ const DEFAULT_ACCESS_FLAG: AccessFlag = AccessFlag::from_bits(0b11110000);
 
 #[bitfield(u32, default = true)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PairingKeyWrite {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     slot0: AccessFlag,
@@ -44,6 +47,7 @@ impl core::fmt::Display for PairingKeyWrite {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PairingKeyRead {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     slot0: AccessFlag,
@@ -79,6 +83,7 @@ impl core::fmt::Display for PairingKeyRead {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PairingKeyInvalidate {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     slot0: AccessFlag,
@@ -114,6 +119,7 @@ impl core::fmt::Display for PairingKeyInvalidate {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RConfigWriteErase {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     write_erase: AccessFlag,
@@ -136,6 +142,7 @@ impl core::fmt::Display for RConfigWriteErase {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RConfigRead {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     read_cfg: AccessFlag,
@@ -165,6 +172,7 @@ impl core::fmt::Display for RConfigRead {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IConfigWrite {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     write_cfg: AccessFlag,
@@ -194,6 +202,7 @@ impl core::fmt::Display for IConfigWrite {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IConfigRead {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     read_cfg: AccessFlag,
@@ -223,6 +232,7 @@ impl core::fmt::Display for IConfigRead {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ping {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     ping: AccessFlag,
@@ -243,6 +253,7 @@ impl core::fmt::Display for Ping {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RMemDataWrite {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     slot0_127: AccessFlag,
@@ -278,6 +289,7 @@ impl core::fmt::Display for RMemDataWrite {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RMemDataRead {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     slot0_127: AccessFlag,
@@ -313,6 +325,7 @@ impl core::fmt::Display for RMemDataRead {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RMemDataErase {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     slot0_127: AccessFlag,
@@ -348,6 +361,7 @@ impl core::fmt::Display for RMemDataErase {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RandomValueGet {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     get: AccessFlag,
@@ -370,6 +384,7 @@ impl core::fmt::Display for RandomValueGet {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EccKeyGenerate {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     slot0_7: AccessFlag,
@@ -405,6 +420,7 @@ impl core::fmt::Display for EccKeyGenerate {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EccKeyStore {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     slot0_7: AccessFlag,
@@ -440,6 +456,7 @@ impl core::fmt::Display for EccKeyStore {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EccKeyRead {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     slot0_7: AccessFlag,
@@ -475,6 +492,7 @@ impl core::fmt::Display for EccKeyRead {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EccKeyErase {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     slot0_7: AccessFlag,
@@ -510,6 +528,7 @@ impl core::fmt::Display for EccKeyErase {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EcdsaSign {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     slot0_7: AccessFlag,
@@ -545,6 +564,7 @@ impl core::fmt::Display for EcdsaSign {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EddsaSign {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     slot0_7: AccessFlag,
@@ -580,6 +600,7 @@ impl core::fmt::Display for EddsaSign {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct McounterInit {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     mc0_3: AccessFlag,
@@ -615,6 +636,7 @@ impl core::fmt::Display for McounterInit {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct McounterGet {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     mc0_3: AccessFlag,
@@ -650,6 +672,7 @@ impl core::fmt::Display for McounterGet {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct McounterUpdate {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     mc0_3: AccessFlag,
@@ -685,6 +708,7 @@ impl core::fmt::Display for McounterUpdate {
 
 #[bitfield(u32)]
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MacAndDestroy {
     #[bits(8, default = DEFAULT_ACCESS_FLAG)]
     mad0_31: AccessFlag,
@@ -747,6 +771,7 @@ implement_register_traits_for_bitfield!(McounterUpdateRegAddr, McounterUpdate, 0
 implement_register_traits_for_bitfield!(MacAndDestroyRegAddr, MacAndDestroy, 0x60, 0x01);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ApplicationUap {
     pub pairing_key_write: PairingKeyWrite,
     pub pairing_key_read: PairingKeyRead,
@@ -765,7 +790,7 @@ pub struct ApplicationUap {
     pub ecc_key_read: EccKeyRead,
     pub ecc_key_erase: EccKeyErase,
     pub ecdsa_sign: EcdsaSign,
-    pub eddsa_sifn: EddsaSign,
+    pub eddsa_sign: EddsaSign,
     pub mcounter_init: McounterInit,
     pub mcounter_get: McounterGet,
     pub mcounter_update: McounterUpdate,
@@ -804,7 +829,7 @@ impl core::fmt::Display for ApplicationUap {
                 .field("ecc_key_read", &self.ecc_key_read)
                 .field("ecc_key_erase", &self.ecc_key_erase)
                 .field("ecdsa_sign", &self.ecdsa_sign)
-                .field("eddsa_sifn", &self.eddsa_sifn)
+                .field("eddsa_sifn", &self.eddsa_sign)
                 .field("mcounter_init", &self.mcounter_init)
                 .field("mcounter_get", &self.mcounter_get)
                 .field("mcounter_update", &self.mcounter_update)
@@ -829,7 +854,7 @@ impl core::fmt::Display for ApplicationUap {
                 self.ecc_key_read,
                 self.ecc_key_erase,
                 self.ecdsa_sign,
-                self.eddsa_sifn,
+                self.eddsa_sign,
                 self.mcounter_init,
                 self.mcounter_get,
                 self.mcounter_update,
@@ -938,7 +963,7 @@ impl core::iter::Iterator for ApplicationUapIter {
             17 => Some(Entry {
                 name: "EddsaSign",
                 addr: EddsaSignRegAddr {}.register_addr(),
-                value: self.uap.eddsa_sifn.into_bits(),
+                value: self.uap.eddsa_sign.into_bits(),
             }),
             18 => Some(Entry {
                 name: "McounterInit",
