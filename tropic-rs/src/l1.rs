@@ -35,7 +35,7 @@ pub struct ChipStatus {
     pub ready: bool,
     /// The chip is in ALARM mode
     pub alarm: bool,
-    /// The chip is in STARTUP mode
+    /// The chip is in STARTUP mode∏
     pub start: bool,
 }
 

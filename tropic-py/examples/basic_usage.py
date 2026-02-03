@@ -19,11 +19,12 @@ logging.basicConfig(
 def main():
     # Connect to TROPIC01 via USB dongle
     # On Linux: /dev/ttyACM0, on macOS: /dev/tty.usbmodem*, on Windows: COM*
-    # PORT = "/dev/ttyACM0"
-    # BAUD_RATE = 115200
+    PORT = "/dev/ttyACM0"
+    BAUD_RATE = 115200
     
-    print(f"Connecting to TROPIC01 model server on default port...")
-    with Tropic01.new_model_server() as tropic:
+    print(f"Connecting to TROPIC01 on {PORT}...")
+    with Tropic01(PORT, BAUD_RATE) as tropic:
+
         # Get chip status
         print("\n=== Chip Status ===")
         status = tropic.get_chip_status()

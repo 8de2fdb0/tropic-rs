@@ -28,8 +28,7 @@ def main():
     print(f"Connecting to TROPIC01 on {PORT}...")
     
     with Tropic01(PORT, BAUD_RATE) as tropic:
-        
-        
+
         # Get cert store to extract device public key
         print("\n=== Getting CertStore ===")
         cert_store_json = tropic.get_cert_store()
