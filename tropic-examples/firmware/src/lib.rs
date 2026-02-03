@@ -1,5 +1,4 @@
 #![no_std]
-
 pub extern crate rp235x_hal as hal;
 
 use hal::rom_data::sys_info_api::ChipInfo;

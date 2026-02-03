@@ -651,7 +651,7 @@ mod tests {
         spi::{Mock as SpiMock, Transaction as SpiMockTransaction},
     };
 
-    use crate::{cert_store::MockDecoder, crc16, l1::ChipStatus, transport::SpiDeviceTransport};
+    use crate::{crc16, l1::ChipStatus, mocks::MockDecoder, transport::SpiDeviceTransport};
 
     use super::*;
 

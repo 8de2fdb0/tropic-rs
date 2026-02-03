@@ -5,7 +5,7 @@ use tropic_rs::transport::{self, spi};
 
 // USB dongle specific constants
 // delay before doing a read, to give the fw time to prepare the response
-const USB_DONGLE_INITIAL_READ_DELAY: u32 = 300;
+const _USB_DONGLE_INITIAL_READ_DELAY: u32 = 300;
 const USB_DONGLE_READ_WRITE_DELAY: u32 = 10;
 
 const HEX_CHAR_LOOKUP: [u8; 16] = *b"0123456789ABCDEF";
@@ -154,7 +154,7 @@ impl UsbDongleTransport {
         Ok(())
     }
 
-    fn transfer_in_place_usb(&mut self, buf: &mut [u8], keep_cs_low: bool) -> Result<(), Error> {
+    fn _transfer_in_place_usb(&mut self, buf: &mut [u8], keep_cs_low: bool) -> Result<(), Error> {
         let mut hex_chars = bytes_to_hexchars(buf);
 
         let read_len = hex_chars.len() + 2;

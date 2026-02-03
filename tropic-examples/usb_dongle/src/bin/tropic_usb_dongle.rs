@@ -10,7 +10,7 @@ use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
 use directories::ProjectDirs;
 
-use tropic_cert_store::nom_decoder::{NomCertificate, NomDecoder};
+use tropic_cert_decoder::nom_decoder::{NomCertificate, NomDecoder};
 use tropic_rs::{cert_store::CertStore, external::x25519_dalek::PublicKey};
 
 use usb_dongle::{serial_transport, type_wrapper, utils};

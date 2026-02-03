@@ -76,27 +76,6 @@ impl<T, D> SpiDeviceTransport<T, D> {
     }
 }
 
-// impl<T, D> spi::ErrorType for SpiDeviceTransport<T, D>
-// where
-//     T: spi::SpiDevice,
-// {
-//     type Error = T::Error;
-// }
-
-// impl<T, D> spi::SpiDevice for SpiDeviceTransport<T, D>
-// where
-//     T: spi::SpiDevice,
-//     D: DelayNs,
-// {
-//     fn transaction(
-//         &mut self,
-//         operations: &mut [spi::Operation<'_, u8>],
-//     ) -> Result<(), Self::Error> {
-//         // Delegate directly to the inner device
-//         self.device.transaction(operations)
-//     }
-// }
-
 impl<T, D> TropicTransport for SpiDeviceTransport<T, D>
 where
     T: spi::SpiDevice,
@@ -118,6 +97,44 @@ where
         l1::receive(&mut self.device, &mut self.delay)
     }
 }
+
+// #[cfg(feature = "async")]
+// pub struct AsyncSpiDeviceTransport<T, D> {
+//     pub device: T,
+//     delay: D,
+// }
+
+// #[cfg(feature = "async")]
+// impl<T, D> AsyncSpiDeviceTransport<T, D> {
+//     pub fn new(device: T, delay: D) -> Self {
+//         Self { device, delay }
+//     }
+// }
+
+// #[cfg(feature = "async")]
+// impl<T, D> TropicTransport for AsyncSpiDeviceTransport<T, D>
+// where
+//     T: embedded_hal_async::spi::SpiDevice,
+//     D: embedded_hal_async::delay::DelayNs,
+// {
+//     fn transfer_in_place(&mut self, buf: &mut [u8]) -> Result<(), Error> {
+//         futures::executor::block_on(self.device.transfer_in_place(buf))
+//             .map_err(|e| Error::Spi(e.kind()))?;
+//         Ok(())
+//     }
+
+//     fn write(&mut self, req: &[u8]) -> Result<(), Error> {
+//         futures::executor::block_on(self.device.write(req)).map_err(|e| Error::Spi(e.kind()))?;
+//         Ok(())
+//     }
+
+//     fn read<const N: usize>(&mut self) -> Result<Response<N>, Error> {
+//         futures::executor::block_on(l1::async_transport::receive(
+//             &mut self.device,
+//             &mut self.delay,
+//         ))
+//     }
+// }
 
 pub struct SpiBusTransport<T, D, CS> {
     bus: T,

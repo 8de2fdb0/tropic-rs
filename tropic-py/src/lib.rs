@@ -10,7 +10,7 @@ use pyo3_stub_gen::{
     derive::{gen_stub_pyclass, gen_stub_pymethods},
 };
 
-use tropic_cert_store::nom_decoder::NomDecoder;
+use tropic_cert_decoder::nom_decoder::NomDecoder;
 use tropic_rs::{
     cert_store::CERT_BUFFER_LEN,
     common::{
@@ -29,8 +29,6 @@ use tropic_rs::{
 
 mod transport;
 use transport::PyTropicTransport;
-
-use crate::transport::model_server;
 
 // Error wrapper for Python
 #[derive(Debug)]
@@ -534,7 +532,7 @@ impl PyTropic01 {
             let pairing_slot =
                 PairingKeySlot::try_from(slot).map_err(|e| PyError(format!("{:?}", e)))?;
 
-            let pubkey = PublicKey::from(<[u8; 32]>::try_from(pubkey.borrow().value).unwrap());
+            let pubkey = PublicKey::from(pubkey.borrow().value);
 
             tropic
                 .pairing_key_write(&mut sess, pairing_slot, &pubkey)

@@ -6,18 +6,28 @@ edition = "2021"
 [[bin]]
 name = "rtic_usb_api_wip"
 path = "src/bin/rtic_usb_api_wip.rs"
+test = false
+bench = false
+doctest = false
 
 [[bin]]
 name = "tropic_ushell"
 path = "src/bin/tropic_ushell.rs"
+test = false
+bench = false
+doctest = false
 
 [lib]
-test = false # disable test builds
+test = false    # disable test builds
+bench = false
+doctest = false
 
 [dependencies]
-tropic-rs = { path = "../../tropic-rs", features = ["display"] }
-tropic-cert-store = { path = "../../tropic-cert-store", default-features = false, features = [
-    # "der-decoder",
+tropic-rs = { path = "../../tropic-rs", features = [
+    "display",
+    "engineering_sample_01",
+] }
+tropic-cert-decoder = { path = "../../tropic-cert-decoder", default-features = false, features = [
     "nom-decoder",
     "defmt",
 ] }

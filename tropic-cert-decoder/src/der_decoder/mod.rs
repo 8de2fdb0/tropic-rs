@@ -1,7 +1,8 @@
 pub mod x509_parser;
 
 use der::Decode;
-use tropic_rs::cert_store::{CertDecoder, CertKind, Certificate, ErrorType, SubjectPubkey};
+
+use crate::{CertDecoder, CertKind, Certificate, ErrorType, SubjectPubkey};
 
 #[non_exhaustive]
 #[derive(Debug)]
@@ -73,13 +74,13 @@ impl core::fmt::Display for Error {
     }
 }
 
-impl tropic_rs::cert_store::Error for Error {
-    fn kind(&self) -> tropic_rs::cert_store::ErrorKind {
+impl crate::Error for Error {
+    fn kind(&self) -> crate::ErrorKind {
         match self {
-            Self::Spki(_) => tropic_rs::cert_store::ErrorKind::Decoding,
-            Self::Der(_) => tropic_rs::cert_store::ErrorKind::Decoding,
-            Self::ExtractPubKey => tropic_rs::cert_store::ErrorKind::ExtractPubKey,
-            Self::UnknownAlgorithmIdentifier => tropic_rs::cert_store::ErrorKind::Decoding,
+            Self::Spki(_) => crate::ErrorKind::Decoding,
+            Self::Der(_) => crate::ErrorKind::Decoding,
+            Self::ExtractPubKey => crate::ErrorKind::ExtractPubKey,
+            Self::UnknownAlgorithmIdentifier => crate::ErrorKind::Decoding,
         }
     }
 }
@@ -130,8 +131,6 @@ impl CertDecoder for DerDecoder {
 
 #[cfg(test)]
 mod tests {
-    use tropic_rs::cert_store;
-
     use super::*;
 
     const DER_1: [u8; 424] = [
@@ -260,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_parse_der_1() {
-        let cert_store = DerDecoder::from_der_and_kind(&DER_1, cert_store::CertKind::Device)
+        let cert_store = DerDecoder::from_der_and_kind(&DER_1, crate::CertKind::Device)
             .expect("unable to parse der_1");
 
         let issuer_c = cert_store

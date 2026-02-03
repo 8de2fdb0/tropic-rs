@@ -13,7 +13,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 tropic-rs = { path = "../tropic-rs", features = ["display", "serde"] }
-tropic-cert-store = { path = "../tropic-cert-store", features = [
+tropic-cert-decoder = { path = "../tropic-cert-decoder", features = [
     "nom-decoder",
     "serde",
 ] }

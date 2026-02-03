@@ -5,14 +5,16 @@ edition = "2021"
 
 [dependencies]
 tropic-rs = { path = "../../tropic-rs", features = ["display", "serde"] }
-tropic-cert-store = { path = "../../tropic-cert-store", features = ["nom-decoder", "serde"]}
+tropic-cert-decoder = { path = "../../tropic-cert-decoder", features = [
+    "nom-decoder",
+    "serde",
+] }
 
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = "1.0"
 pem = "3.0"
-pkcs8 = { version = "0.10", features = ["pem"]}
+pkcs8 = { version = "0.10", features = ["pem"] }
 rand = "0.9"
-
 
 clap = { version = "4.5", features = ["derive"] }
 thiserror = "2"

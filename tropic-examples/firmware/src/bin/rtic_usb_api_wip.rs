@@ -4,29 +4,24 @@
 use core::fmt::Write;
 use core::mem::MaybeUninit;
 
-use embedded_cli::cli::CliHandle;
 use embedded_hal::digital::OutputPin;
+use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_io::Write as _;
+
 use heapless::String;
 use panic_halt as _;
 use panic_halt as _;
 use rtic_monotonics::rp235x::prelude::*;
-use rtic_sync::arbiter::{spi::ArbiterDevice, Arbiter};
 use usb_device::bus::UsbBusAllocator;
 use usb_device::{
     device::{UsbDeviceBuilder, UsbVidPid},
     LangID,
 };
 
-use embedded_hal::spi::{self, SpiBus};
 use hal::fugit::RateExtU32;
 use rp235x_hal::Clock as _;
-use tropic_rs::Tropic01;
 
-use common::{
-    usb::consts::{PRODUCT_ID, VENDOR_ID},
-    Commands, SysCmd,
-};
+use tropic_rs::{transport::SpiDeviceTransport, Tropic01};
 
 use firmware::{
     get_chip_info,
@@ -68,11 +63,11 @@ type TropicSpiCS = rp235x_hal::gpio::Pin<
     rp235x_hal::gpio::PullDown,
 >;
 
-type TropicArbiterSpiBus = Arbiter<TropicSpiBus>;
-type TropicArbiterSpiDevice =
-    Arbiter<embedded_hal_bus::spi::ExclusiveDevice<TropicArbiterSpiBus, TropicSpiCS, Mono>>;
+type TropicSpiDeviceTransport =
+    SpiDeviceTransport<ExclusiveDevice<TropicSpiBus, TropicSpiCS, Mono>, Mono>;
 
-type TropicArbiterDevice = ArbiterDevice<'static, TropicSpiBus, TropicSpiCS, Mono>;
+type TropicDriver =
+    Tropic01<TropicSpiDeviceTransport, tropic_cert_decoder::nom_decoder::NomDecoder>;
 
 #[rtic::app(device = hal::pac, peripherals = true, dispatchers = [UART0_IRQ])]
 mod app {
@@ -97,59 +92,11 @@ mod app {
         // serial: usbd_serial::SerialPort<'static, rp235x_hal::usb::UsbBus>,
         serial_reader: usbd_serial::SerialReader<'static, rp235x_hal::usb::UsbBus>,
         serial_writer: usbd_serial::SerialWriter<'static, rp235x_hal::usb::UsbBus>,
-        // embedded_cli: embedded_cli::cli::Cli<
-        //     usbd_serial::SerialWriter<'static, rp235x_hal::usb::UsbBus>,
-        //     <usbd_serial::SerialWriter<'static, rp235x_hal::usb::UsbBus> as usbd_serial::embedded_io::ErrorType>::Error,
-        //     [u8; 40],
-        //     [u8; 100],
-        // >,
-        // tropic: Tropic01<
-        //     embedded_hal_bus::spi::ExclusiveDevice<
-        //         hal::spi::Spi<_, _, _, 8>,
-        //         hal::gpio::Pin<
-        //             hal::gpio::bank0::Gpio17,
-        //             hal::gpio::FunctionSpi,
-        //             hal::gpio::PullNone,
-        //         >,
-        //         Mono,
-        //     >,
-        // >,
-        // tropic: Tropic01<
-        //     embedded_hal_bus::spi::ExclusiveDevice<
-        //         rp235x_hal::Spi<
-        //             rp235x_hal::spi::Enabled,
-        //             you_must_enable_the_rt_feature_for_the_pac_in_your_cargo_toml::SPI0,
-        //             (
-        //                 rp235x_hal::gpio::Pin<
-        //                     rp235x_hal::gpio::bank0::Gpio19,
-        //                     rp235x_hal::gpio::FunctionSpi,
-        //                     rp235x_hal::gpio::PullNone,
-        //                 >,
-        //                 rp235x_hal::gpio::Pin<
-        //                     rp235x_hal::gpio::bank0::Gpio16,
-        //                     rp235x_hal::gpio::FunctionSpi,
-        //                     rp235x_hal::gpio::PullNone,
-        //                 >,
-        //                 rp235x_hal::gpio::Pin<
-        //                     rp235x_hal::gpio::bank0::Gpio18,
-        //                     rp235x_hal::gpio::FunctionSpi,
-        //                     rp235x_hal::gpio::PullNone,
-        //                 >,
-        //             ),
-        //         >,
-        //         rp235x_hal::gpio::Pin<
-        //             rp235x_hal::gpio::bank0::Gpio17,
-        //             rp235x_hal::gpio::FunctionSio<rp235x_hal::gpio::SioOutput>,
-        //             rp235x_hal::gpio::PullDown,
-        //         >,
-        //         Mono,
-        //     >,
-        // >,
     }
 
     #[local]
     struct Local {
-        tropic: Tropic01<TropicArbiterDevice>,
+        tropic: &'static mut TropicDriver,
     }
 
     #[init(local = [
@@ -157,9 +104,10 @@ mod app {
         CLI_COMMAND_BUFFER: [u8; 40] = [0; 40],
         CLI_HISTORY_BUFFER: [u8; 41] = [0; 41],
 
-        spi_bus_arbiter: MaybeUninit<TropicArbiterSpiBus> = MaybeUninit::uninit(),
-        spi_device_arbiter: MaybeUninit<TropicArbiterSpiDevice> = MaybeUninit::uninit(),
-        ])]
+        tropic_driver: MaybeUninit<TropicDriver> = MaybeUninit::uninit(),
+        ]
+    )]
+
     fn init(cx: init::Context) -> (Shared, Local) {
         // Soft-reset does not release the hardware spinlocks
         // Release them now to avoid a deadlock after debug or watchdog reset
@@ -232,8 +180,8 @@ mod app {
         //     .unwrap()
         //     .build();
 
-        let command_buffer: &'static _ = cx.local.CLI_COMMAND_BUFFER;
-        let history_buffer: &'static _ = cx.local.CLI_HISTORY_BUFFER;
+        // let command_buffer: &'static _ = cx.local.CLI_COMMAND_BUFFER;
+        // let history_buffer: &'static _ = cx.local.CLI_HISTORY_BUFFER;
 
         // let embedded_cli = embedded_cli::cli::CliBuilder::default()
         //     .writer(serial_writer)
@@ -269,15 +217,10 @@ mod app {
             &embedded_hal::spi::MODE_0,
         );
 
-        let spi_bus_arbiter = cx.local.spi_bus_arbiter.write(Arbiter::new(spi_bus));
-        let a = cx.local.spi_bus_arbiter.as_ptr();
-
-        let spi_device = embedded_hal_bus::spi::ExclusiveDevice::new(a, spi_cs, Mono).unwrap();
-
-        let spi_device_arbiter = cx.local.spi_device_arbiter.write(Arbiter::new(spi_device));
-
-        let tropic = Tropic01::new(spi_device_arbiter);
-
+        let spi_excl_device = ExclusiveDevice::new(spi_bus, spi_cs, Mono).unwrap();
+        let transport = SpiDeviceTransport::new(spi_excl_device, Mono);
+        let tropic = Tropic01::<_, tropic_cert_decoder::nom_decoder::NomDecoder>::new(transport);
+        let tropic = cx.local.tropic_driver.write(tropic);
         let ping_cnt = 0;
 
         blink_led::spawn().ok();

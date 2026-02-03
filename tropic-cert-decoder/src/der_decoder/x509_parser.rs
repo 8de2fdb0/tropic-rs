@@ -68,14 +68,14 @@ pub(crate) const OBJ_ID_P521: ObjectIdentifier = ObjectIdentifier::new_unwrap("1
 
 pub(crate) fn get_pubkey_from_subject_public_key_info<'a>(
     subject_public_key_info: &SubjectPublicKeyInfoRef<'a>,
-) -> Result<tropic_rs::cert_store::SubjectPubkey<'a>, super::Error> {
+) -> Result<crate::SubjectPubkey<'a>, super::Error> {
     let algorithm = match subject_public_key_info.algorithm.oid {
-        OBJ_ID_CURVEX25519_PUBKEY => tropic_rs::cert_store::PubKeyAlgorithm::X25519Pubkey,
+        OBJ_ID_CURVEX25519_PUBKEY => crate::PubKeyAlgorithm::X25519Pubkey,
         OBJ_ID_EC_PUBKEY => {
             if let Ok(params_oid) = subject_public_key_info.algorithm.parameters_oid() {
                 match params_oid {
-                    OBJ_ID_P384 => tropic_rs::cert_store::PubKeyAlgorithm::EcPubkeyP384,
-                    OBJ_ID_P521 => tropic_rs::cert_store::PubKeyAlgorithm::EcPubkeyP521,
+                    OBJ_ID_P384 => crate::PubKeyAlgorithm::EcPubkeyP384,
+                    OBJ_ID_P521 => crate::PubKeyAlgorithm::EcPubkeyP521,
                     _ => return Err(super::Error::UnknownAlgorithmIdentifier),
                 }
             } else {
@@ -85,7 +85,7 @@ pub(crate) fn get_pubkey_from_subject_public_key_info<'a>(
         _ => return Err(super::Error::UnknownAlgorithmIdentifier),
     };
 
-    Ok(tropic_rs::cert_store::SubjectPubkey {
+    Ok(crate::SubjectPubkey {
         algorithm,
         public_key: subject_public_key_info.subject_public_key.raw_bytes(),
     })

@@ -1,0 +1,55 @@
+name: Lint
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint (rustfmt + clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          override: true
+
+      - name: Lint selected crates (manual list)
+        env:
+          # Edit this list to include the crate directories you want linted (one per line).
+          CRATES: |
+            tropic-rs
+            tropic-cert-decoder
+            tropic-py
+        run: |
+          set -euo pipefail
+          # Read manual list into array (skip empty lines)
+          IFS=$'\n' read -rd '' -a crates <<<"$(printf "%s\n" "$CRATES" | sed '/^\s*$/d')" || true
+          echo "Crates to lint: ${crates[*]}"
+          for dir in "${crates[@]}"; do
+            dir_trimmed=$(echo "$dir" | xargs)
+            [ -z "$dir_trimmed" ] && continue
+            echo "== Linting ${dir_trimmed} =="
+            if [ -f "$dir_trimmed/Cargo.toml" ]; then
+              pushd "$dir_trimmed"
+              cargo fmt -- --check
+              cargo clippy --all-targets --all-features -- -D warnings
+              popd
+            else
+              echo "Warning: $dir_trimmed/Cargo.toml not found, skipping"
+            fi
+          done

@@ -1,6 +1,6 @@
 use nom::{IResult, Parser, bytes::complete::take, combinator::verify, number::complete::be_u8};
 
-use tropic_rs::cert_store::PubKeyAlgorithm;
+use crate::PubKeyAlgorithm;
 
 #[derive(Debug)]
 pub enum Error<'a> {

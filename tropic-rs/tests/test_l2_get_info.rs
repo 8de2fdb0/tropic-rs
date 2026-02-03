@@ -238,5 +238,7 @@ fn test_l2_firmware_versions() {
         .get_firmware_boot_header(tropic_rs::l2::info::BankId::FwBankFw1)
         .expect("failded to get firmware bootheader for fw1");
 
+    assert_eq!(firmware_boot_header, FirmwareBootHeader::Empty);
+
     model_server.cleanup();
 }
