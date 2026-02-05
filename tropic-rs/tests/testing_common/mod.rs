@@ -20,7 +20,7 @@ use log::info;
 use rand::RngCore;
 use x25519_dalek::StaticSecret;
 
-use tropic_cert_store::nom_decoder::NomDecoder;
+use tropic_cert_decoder::nom_decoder::NomDecoder;
 use tropic_rs::{
     Tropic01, cert_store, common,
     l3::{EncSession, session},

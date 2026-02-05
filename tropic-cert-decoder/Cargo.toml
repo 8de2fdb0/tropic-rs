@@ -1,12 +1,9 @@
 [package]
-name = "tropic-cert-store"
+name = "tropic-cert-decoder"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tropic-rs = { path = "../tropic-rs" }
-
-# x509 cert parsing
 der = { version = "0.7", default-features = false, features = [
     "derive",
     "oid",
@@ -20,6 +17,11 @@ defmt = { version = "1", default-features = false, optional = true }
 
 serde = { version = "1.0", features = ["derive"], optional = true }
 base64ct = { version = "1.8", features = [], optional = true }
+hex = { package = "const-hex", version = "1.17", optional = true }
+
+x25519-dalek = { version = "2.0", default-features = false, features = [
+    "static_secrets",
+] }
 
 [features]
 default = ["der-decoder", "nom-decoder"]
@@ -27,4 +29,7 @@ display = []
 defmt = ["dep:defmt"]
 der-decoder = ["dep:der", "dep:der_derive", "dep:spki"]
 nom-decoder = ["dep:nom"]
-serde = ["dep:serde", "dep:base64ct", "tropic-rs/serde"]
+serde = ["dep:serde", "dep:base64ct", "dep:hex"]
+
+[dev-dependencies]
+serde_json = "1"

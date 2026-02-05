@@ -1,15 +1,12 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use tropic_cert_decoder::{CertDecoder, Certificate, Error as _};
+
 use crate::{
-    cert_store::{Certificate, Error as _},
     l2::{self, info},
     transport,
 };
-
-/// Maximal size of TROPIC01's certificate
-pub(crate) const _CERT_SIZE_TOTAL: usize = 3840;
-pub const CERT_SIZE_SINGLE: usize = 700;
 
 pub(crate) const CERT_STORE_VERSION: u8 = 1;
 pub(crate) const NUM_CERTIFICATES: usize = 4;
@@ -25,7 +22,7 @@ pub enum Error {
     CertNotFound,
     ExtractPubKey,
     PubKeyWrongSize(usize),
-    Certificate(crate::cert_store::ErrorKind),
+    CertDecoder(tropic_cert_decoder::ErrorKind),
 }
 
 #[cfg(feature = "display")]
@@ -41,14 +38,14 @@ impl core::fmt::Display for Error {
             Self::CertNotFound => f.write_str("certificate not found"),
             Self::ExtractPubKey => f.write_str("unable to extract pubkey"),
             Self::PubKeyWrongSize(size) => f.write_fmt(format_args!("pubkey wrong size: {}", size)),
-            Self::Certificate(e) => f.write_fmt(format_args!("certificate error: {}", e)),
+            Self::CertDecoder(e) => f.write_fmt(format_args!("certificate error: {}", e)),
         }
     }
 }
 
 impl<E: crate::cert_store::Error> From<E> for Error {
     fn from(err: E) -> Self {
-        Self::Certificate(err.kind())
+        Self::CertDecoder(err.kind())
     }
 }
 
@@ -56,7 +53,7 @@ const HEADER_OFFSET: usize = 2; // Version (1) + Num_Certs (1)
 const CERT_STORE_RSP_LEN: usize = 128; // same as GET_INFO_BLOCK_LEN
 
 /// Recommended size of certificate buffer.
-pub const CERT_BUFFER_LEN: usize = 10 * CERT_SIZE_SINGLE;
+pub const CERT_BUFFER_LEN: usize = 10 * tropic_cert_decoder::CERT_SIZE_SINGLE;
 
 // The struct to hold the parsed certificates in a no_std friendly way.
 // This assumes a maximum of 10 certificates.
@@ -109,11 +106,7 @@ where
     }
 }
 
-pub(crate) fn request_cert_store<
-    'a,
-    T: crate::transport::TropicTransport,
-    C: crate::cert_store::CertDecoder,
->(
+pub(crate) fn request_cert_store<'a, T: crate::transport::TropicTransport, C: CertDecoder>(
     transport: &mut T,
     certificate_buffer: &'a mut [u8],
 ) -> Result<CertStore<C::Cert<'a>>, l2::Error> {
@@ -204,7 +197,7 @@ pub(crate) fn request_cert_store<
         // Parse and store in certificates array
         certificates[i] = Some(
             C::from_der_and_kind(cert_data, i.into())
-                .map_err(|e| l2::Error::CertStore(Error::Certificate(e.kind())))?,
+                .map_err(|e| l2::Error::CertStore(Error::CertDecoder(e.kind())))?,
         );
 
         current_offset = end_offset;
@@ -217,4 +210,58 @@ pub(crate) fn request_cert_store<
         total_packets_needed,
         certificates,
     })
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+
+    use tropic_cert_decoder::{
+        CertDecoder, CertKind, Certificate, ErrorType, PubKeyAlgorithm, SubjectPubkey,
+    };
+
+    pub struct MockCertificate<'a> {
+        kind: CertKind,
+        pubkey: &'a [u8],
+    }
+
+    impl<'a> ErrorType for MockCertificate<'a> {
+        type Error<'b> = core::convert::Infallible;
+    }
+
+    impl<'a> Certificate<'a> for MockCertificate<'a> {
+        fn kind(&self) -> &CertKind {
+            &self.kind
+        }
+        fn pubkey(&self) -> Result<SubjectPubkey<'a>, Self::Error<'_>> {
+            Ok(SubjectPubkey {
+                algorithm: PubKeyAlgorithm::X25519Pubkey,
+                public_key: self.pubkey,
+            })
+        }
+    }
+
+    pub struct MockDecoder {
+        #[allow(unused)]
+        kind: CertKind,
+        #[allow(unused)]
+        pubkey: [u8; 32],
+    }
+
+    impl ErrorType for MockDecoder {
+        type Error<'a> = core::convert::Infallible;
+    }
+
+    impl CertDecoder for MockDecoder {
+        type Cert<'a> = MockCertificate<'a>;
+
+        fn from_der_and_kind<'a>(
+            der_buf: &'a [u8],
+            kind: CertKind,
+        ) -> Result<Self::Cert<'a>, Self::Error<'a>> {
+            Ok(MockCertificate {
+                pubkey: der_buf,
+                kind,
+            })
+        }
+    }
 }

@@ -1,0 +1,32 @@
+[package]
+name = "tropic-py"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "stub_gen"
+doc = false
+
+[lib]
+name = "tropic_py"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tropic-rs = { path = "../tropic-rs", features = ["display", "serde"] }
+tropic-cert-decoder = { path = "../tropic-cert-decoder", features = [
+    "nom-decoder",
+    "serde",
+] }
+#pyo3 = { version = "0.27", features = ["extension-module"] }
+pyo3 = { version = "0.27" }
+pyo3-stub-gen = "0.17"
+pyo3-log = "0.13"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+serial2 = "0.2.33"
+rand = "0.9"
+hex = { package = "const-hex", version = "1.17" }
+
+[build-dependencies]
+pyo3-build-config = "0.27"

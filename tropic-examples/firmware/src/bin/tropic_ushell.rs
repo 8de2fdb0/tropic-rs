@@ -28,13 +28,8 @@ use defmt::{error, info, unwrap};
 use defmt_rtt as _; // Import this to link the RTT logger
 use panic_probe as _; // The panic handler for defmt
 
-use tropic_rs::{
-    common::config::bootloader::{DebugRegAddr, SensorRegAddr, StartUpRegAddr},
-    transport::SpiDeviceTransport,
-    Tropic01,
-};
-
-const AUTOCOMPLETE_LEN: usize = 15;
+use tropic_rs::{transport::SpiDeviceTransport, Tropic01};
+const AUTOCOMPLETE_LEN: usize = 16;
 const CMD_LEN: usize = 64;
 
 type UsbUshell<'a> = ushell::UShell<
@@ -76,10 +71,10 @@ type TropicInst<'a> = Tropic01<
         >,
         rp235x_hal::Timer<rp235x_hal::timer::CopyableTimer0>,
     >,
-    tropic_cert_store::nom_decoder::NomDecoder,
+    tropic_cert_decoder::nom_decoder::NomDecoder,
 >;
 type TropicCertStore<'a> =
-    tropic_rs::cert_store::CertStore<tropic_cert_store::nom_decoder::NomCertificate<'a>>;
+    tropic_rs::cert_store::CertStore<tropic_cert_decoder::nom_decoder::NomCertificate<'a>>;
 
 /// Tell the Boot ROM about our application
 #[link_section = ".start_block"]
@@ -96,6 +91,7 @@ const USHELL_CR: &str = "\r\n";
 const USHELL_AUTOCOMPLETE: [&str; AUTOCOMPLETE_LEN] = [
     "rp235x-ping",
     "rp235x-chip-id",
+    "tropic-version",
     "tropic-chip-id",
     "tropic-chip-status",
     "tropic-riscv-fw",
@@ -118,6 +114,7 @@ RP235X COMMANDS:\r\n\
 \trp235x-ping                 Ping the device\r\n\
 \trp235x-chip-id       Get chip ID\r\n\r\n\
 Tropic COMMANDS:\r\n\
+\ttropic-version                   Get library version info\r\n\
 \ttropic-chip-status               Get chip status\r\n\
 \ttropic-chip-id                   Get chip ID\r\n\
 \ttropic-riscv-fw                  Get riscv firmware version\r\n\
@@ -231,7 +228,7 @@ fn main() -> ! {
         embedded_hal_bus::spi::ExclusiveDevice::new(spi_bus, &mut cs_pin, timer).unwrap();
 
     info!("setting up tropci_01");
-    let mut tropci_01 = Tropic01::<_, tropic_cert_store::nom_decoder::NomDecoder>::new(
+    let mut tropci_01 = Tropic01::<_, tropic_cert_decoder::nom_decoder::NomDecoder>::new(
         SpiDeviceTransport::new(spi_device, timer),
     );
 
@@ -317,6 +314,10 @@ fn main() -> ! {
                                 write!(shell, "{0:}error: {err}{0:}", USHELL_CR).ok();
                             })
                             .ok();
+                        }
+                        "tropic-version" => {
+                            let ver = tropic_rs::version::info();
+                            write!(shell, "{0:}tropic-rs version: {ver}{0:}", USHELL_CR).ok();
                         }
                         "rp235x-ping" => handle_ping(&mut shell, &mut ping_cnt),
                         "rp235x-chip-id" => handle_rp235x_chip_id(&mut shell),
@@ -559,9 +560,7 @@ fn handle_tropic_cert_store<'a>(
 }
 
 fn handle_tropic_riscv_fw(shell: &mut UsbUshell, tropci_01: &mut TropicInst) -> Result<(), Error> {
-    let version = tropci_01
-        .get_firmware_version(tropic_rs::l2::info::FirmwareType::Riscv)?
-        .version;
+    let version = tropci_01.get_firmware_version(tropic_rs::l2::info::FirmwareType::Riscv)?;
     write!(
         shell,
         "{0:}tropic riscv firmware version: {version:?}{0:}",
@@ -572,9 +571,7 @@ fn handle_tropic_riscv_fw(shell: &mut UsbUshell, tropci_01: &mut TropicInst) -> 
 }
 
 fn handle_tropic_spect_fw(shell: &mut UsbUshell, tropci_01: &mut TropicInst) -> Result<(), Error> {
-    let version = tropci_01
-        .get_firmware_version(tropic_rs::l2::info::FirmwareType::Spect)?
-        .version;
+    let version = tropci_01.get_firmware_version(tropic_rs::l2::info::FirmwareType::Spect)?;
     write!(
         shell,
         "{0:}tropic spect firmware version: {version:?}{0:}",
@@ -715,16 +712,12 @@ fn handle_tropic_config_read(
     };
 
     match args.as_str() {
-        "start-up" => {
-            let resp = tropci_01.r_config_read_value(session, &StartUpRegAddr)?;
+        "r" => {
+            let resp = tropci_01.r_config_read(session)?;
             write!(shell, "{0:}config_read: {resp}{0:}", USHELL_CR)?;
         }
-        "sensors" => {
-            let resp = tropci_01.r_config_read_value(session, &SensorRegAddr)?;
-            write!(shell, "{0:}config_read: {resp}{0:}", USHELL_CR)?;
-        }
-        "debug" => {
-            let resp = tropci_01.r_config_read_value(session, &DebugRegAddr)?;
+        "i" => {
+            let resp = tropci_01.i_config_read(session)?;
             write!(shell, "{0:}config_read: {resp}{0:}", USHELL_CR)?;
         }
         "" => return Err(Error::ArgMissing),

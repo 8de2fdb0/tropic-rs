@@ -48,6 +48,7 @@ impl core::fmt::Display for StartUp {
 }
 
 /// CFG_SENSORS register fields
+#[allow(clippy::enum_variant_names)]
 #[bitflag(u32)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

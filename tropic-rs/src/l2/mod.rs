@@ -1,4 +1,4 @@
-pub(crate) mod cert;
+// pub(crate) mod cert;
 pub(crate) mod cert_store;
 pub mod info;
 
@@ -37,7 +37,7 @@ pub enum Error {
     RespMaxLoops,
     EncCmdReqSize(usize, usize),
     EncCmdRespSize(usize, usize),
-    CertStore(cert_store::Error),
+    CertStore(crate::l2::cert_store::Error),
     NoSession,
     ChipMode(l1::ChipMode),
     UnknownFirmwareType(u16),

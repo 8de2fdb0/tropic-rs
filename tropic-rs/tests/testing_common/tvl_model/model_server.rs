@@ -8,6 +8,7 @@ use std::{
 
 use derive_builder::Builder;
 use log::{debug, error, info, warn};
+use rand_core::le;
 use tempfile::NamedTempFile;
 use wait_timeout::ChildExt;
 
@@ -44,8 +45,30 @@ pub struct ModelServer {
 }
 
 impl ModelServer {
+    fn use_model_server_from_env() -> Option<u16> {
+        let port_str = std::env::var("TROPIC_MODEL_SERVER_PORT").ok()?;
+        let port: u16 = port_str.parse().ok()?;
+        Some(port)
+    }
+
     // A function to set up the server.
     pub fn start_tcp(&mut self) {
+        if let Some(port) = Self::use_model_server_from_env() {
+            info!(
+                "Using existing model server at port {} from environment variables.",
+                port
+            );
+            self.inner = Some(ModelServerInner {
+                port,
+                model_cfg_tmpfile: NamedTempFile::new().unwrap(),
+                model_logging_cfg: LoggingCfg::default(),
+                model_logging_cfg_tmpfile: NamedTempFile::new().unwrap(),
+                model_server_log: NamedTempFile::new().unwrap(),
+                child: Command::new("true").spawn().unwrap(), // Dummy child process
+            });
+            return;
+        }
+
         // Get a free port in the Rust parent process and hold onto it.
         let (listener, port) = get_ephemeral_listener().expect("Failed to get free port");
 

@@ -2,8 +2,11 @@
 name = "tropic-rs"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 
 [dependencies]
+tropic-cert-decoder = { path = "../tropic-cert-decoder", default-features = false }
+
 embedded-hal = "1"
 
 # bridge traits between rand_core_0_6 -> rand_core_0_9 
@@ -29,7 +32,13 @@ defmt = { version = "1.0", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 paste = "1"
 
+# ecdsa = "0.16"
+
 [dev-dependencies]
+tropic-cert-decoder = { path = "../tropic-cert-decoder", default-features = false, features = [
+    "nom-decoder",
+] }
+
 embedded-hal-mock = { version = "0.11", default-features = false, features = [
     'eh1',
 ] }
@@ -44,13 +53,13 @@ derive_builder = "0.20"
 p256 = { version = "0.13", features = ["ecdsa"] }
 ed25519-dalek-fiat = "0.1"
 
-tropic-cert-store = { path = "../tropic-cert-store", default-features = false, features = [
-    "nom-decoder",
-] } # ecdsa = "0.16"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
 wait-timeout = "0.2"
+
+[build-dependencies]
+vergen-git2 = { version = "9.1", features = ["build", "cargo", "rustc", "si"] }
 
 [features]
 default = []
@@ -60,4 +69,5 @@ abab = []
 acab = []
 config-iter = []
 serde = ["dep:serde", "x25519-dalek/serde", "bitflag-attr/serde"]
-engineering_sample_01 = [] # use slot0 private key for first gen of engineering samples
+engineering_sample_01 = [
+] # use slot0 private key for first gen of engineering samples

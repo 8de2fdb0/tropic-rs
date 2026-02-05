@@ -1,0 +1,26 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "tropic-py"
+version = "0.1.0"
+description = "Python bindings for TROPIC01 secure element via USB dongle"
+readme = "README.md"
+requires-python = ">=3.7"
+license = { text = "MIT OR Apache-2.0" }
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+]
+
+[tool.maturin]
+python-source = "python"
+module-name = "tropic_py._tropic_py"
+features = ["pyo3/extension-module"]
+
+[project.optional-dependencies]
+dev = ["pynacl>=1.6.1", "maturin>=1.0,<2.0"]

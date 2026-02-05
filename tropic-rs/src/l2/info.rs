@@ -449,6 +449,7 @@ impl From<FirmwareType> for GetInfoObjectId {
     }
 }
 
+#[derive(Debug)]
 pub struct FirmwareVersion {
     pub r#type: FirmwareType,
     pub version: [u8; 4],

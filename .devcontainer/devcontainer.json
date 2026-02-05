@@ -1,19 +1,39 @@
 {
-    // Based of https://github.com/mwinters-stuff/vscode-devcontainer-raspberrypi-pico/blob/main/.devcontainer/devcontainer.json.
-    "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
     "name": "tropic-rs-devcontainer",
     "image": "tropic-rs-devcontainer",
     "build": {
         "dockerfile": "Dockerfile"
     },
+    "remoteUser": "vscode",
+    "privileged": true,
+    "capAdd": [
+        "SYS_PTRACE"
+    ],
+    "securityOpt": [
+        "seccomp=unconfined"
+    ],
+    "mounts": [
+        {
+            "type": "bind",
+            "source": "/dev/bus/usb",
+            "target": "/dev/bus/usb"
+        }
+    ],
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:2": {
+            "installZsh": "true",
+            "username": "vscode",
+            "userUid": "1000",
+            "userGid": "1000",
+            "upgradePackages": "true"
+        },
+        "ghcr.io/devcontainers/features/git:1": {
+            "version": "latest",
+            "ppa": "false"
+        }
+    },
     "runArgs": [
-        "--cap-add=SYS_PTRACE",
-        "--security-opt",
-        "seccomp=unconfined",
-        "--privileged",
         "--group-add=keep-groups",
-        "-v",
-        "/dev/bus/usb:/dev/bus/usb",
         "--device=/dev/bus/usb",
         "--device=/dev/ttyACM0",
         "--device=2e8a:000c"

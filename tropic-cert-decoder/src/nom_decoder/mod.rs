@@ -3,9 +3,9 @@ pub mod nom_parser;
 #[cfg(feature = "serde")]
 use base64ct::{Base64, Encoding};
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::MapAccess, ser::SerializeStruct};
 
-use tropic_rs::cert_store::{CertDecoder, CertKind, Certificate, ErrorType, SubjectPubkey};
+use crate::{CertDecoder, CertKind, Certificate, ErrorType, SubjectPubkey};
 
 #[non_exhaustive]
 #[derive(Debug)]
@@ -35,11 +35,11 @@ impl<'a> core::fmt::Display for Error<'a> {
     }
 }
 
-impl tropic_rs::cert_store::Error for Error<'_> {
-    fn kind(&self) -> tropic_rs::cert_store::ErrorKind {
+impl crate::Error for Error<'_> {
+    fn kind(&self) -> crate::ErrorKind {
         match self {
-            Self::NomParser(_) => tropic_rs::cert_store::ErrorKind::Decoding,
-            Self::ExtractPubKey => tropic_rs::cert_store::ErrorKind::ExtractPubKey,
+            Self::NomParser(_) => crate::ErrorKind::Decoding,
+            Self::ExtractPubKey => crate::ErrorKind::ExtractPubKey,
         }
     }
 }
@@ -55,15 +55,21 @@ fn serialize_cert<S>(cert: &nom_parser::Certificate, serializer: S) -> Result<S:
 where
     S: serde::Serializer,
 {
+    use crate::CERT_SIZE_SINGLE;
     use base64ct::{Base64, Encoding};
-    use tropic_rs::cert_store::CERT_SIZE_SINGLE;
 
     let mut buf = [0u8; CERT_SIZE_SINGLE * 4 / 3 + 4]; // base64 size
 
     let b64_str = Base64::encode(cert.raw_der, &mut buf)
         .map_err(|_| serde::ser::Error::custom("cert too large"))?;
 
-    serializer.serialize_str(b64_str)
+    let hex_pubkey = hex::encode(cert.spki.public_key.data);
+
+    let mut state = serializer.serialize_struct("cert", 3)?;
+    state.serialize_field("raw_cert", b64_str)?;
+    state.serialize_field("algorithm", &cert.spki.algorithm)?;
+    state.serialize_field("public_key", &hex_pubkey)?;
+    state.end()
 }
 
 #[cfg(feature = "serde")]
@@ -80,22 +86,39 @@ where
             formatter.write_str("a base64 encoded string representing a DER-encoded certificate")
         }
 
-        fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+        fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
         where
-            E: serde::de::Error,
+            V: MapAccess<'de>,
         {
+            let mut raw_cert_b64_str: Option<&str> = None;
+
+            while let Some(key) = map.next_key()? {
+                match key {
+                    "raw_cert" => {
+                        raw_cert_b64_str = Some(map.next_value()?);
+                    }
+                    _ => {
+                        let _: serde::de::IgnoredAny = map.next_value()?;
+                    }
+                }
+            }
+
+            let b64_str =
+                raw_cert_b64_str.ok_or_else(|| serde::de::Error::missing_field("raw_cert"))?;
+
             let der_bytes = unsafe {
                 let bytes_mut: &mut [u8] =
-                    core::slice::from_raw_parts_mut(v.as_ptr() as *mut u8, v.len());
-                Base64::decode_in_place(bytes_mut).map_err(E::custom)?
+                    core::slice::from_raw_parts_mut(b64_str.as_ptr() as *mut u8, b64_str.len());
+                Base64::decode_in_place(bytes_mut).map_err(serde::de::Error::custom)?
             };
 
             nom_parser::extract_x509_certificate_parts(der_bytes)
-                .map_err(|_| E::custom("invalid X.509 certificate"))
+                .map_err(|_| serde::de::Error::custom("invalid X.509 certificate"))
         }
     }
 
-    deserializer.deserialize_bytes(CertVisitor)
+    const FIELDS: &[&str] = &["raw_cert"];
+    deserializer.deserialize_struct("cert", FIELDS, CertVisitor)
 }
 
 #[derive(Debug)]
@@ -159,7 +182,7 @@ impl CertDecoder for NomDecoder {
 
 #[cfg(test)]
 mod tests {
-    use tropic_rs::cert_store::{self, PubKeyAlgorithm};
+    use crate::{CertKind, PubKeyAlgorithm};
 
     use super::*;
 
@@ -368,8 +391,8 @@ mod tests {
 
     #[test]
     fn test_parse_der_1() {
-        let cert_store = NomDecoder::from_der_and_kind(&DER_1, cert_store::CertKind::Device)
-            .expect("unable to parse der_1");
+        let cert_store =
+            NomDecoder::from_der_and_kind(&DER_1, CertKind::Device).expect("unable to parse der_1");
 
         assert_eq!(
             cert_store.cert.spki.algorithm,
@@ -389,8 +412,8 @@ mod tests {
 
     #[test]
     fn test_parse_der_2() {
-        let cert_store = NomDecoder::from_der_and_kind(&DER_2, cert_store::CertKind::Device)
-            .expect("unable to parse der_1");
+        let cert_store =
+            NomDecoder::from_der_and_kind(&DER_2, CertKind::Device).expect("unable to parse der_1");
 
         assert_eq!(
             cert_store.cert.spki.algorithm,
@@ -410,8 +433,8 @@ mod tests {
 
     #[test]
     fn test_parse_der_3() {
-        let cert_store = NomDecoder::from_der_and_kind(&DER_3, cert_store::CertKind::Device)
-            .expect("unable to parse der_1");
+        let cert_store =
+            NomDecoder::from_der_and_kind(&DER_3, CertKind::Device).expect("unable to parse der_1");
 
         assert_eq!(
             cert_store.cert.spki.algorithm,
@@ -430,8 +453,8 @@ mod tests {
 
     #[test]
     fn test_parse_der_4() {
-        let cert_store = NomDecoder::from_der_and_kind(&DER_4, cert_store::CertKind::Device)
-            .expect("unable to parse der_1");
+        let cert_store =
+            NomDecoder::from_der_and_kind(&DER_4, CertKind::Device).expect("unable to parse der_1");
 
         assert_eq!(
             cert_store.cert.spki.algorithm,
@@ -447,5 +470,34 @@ mod tests {
 
         let subjetc_pubkey = cert_store.pubkey().expect("unable to parse pubkey");
         assert_eq!(subjetc_pubkey.public_key, &DER_4_PUBKEY);
+    }
+
+    #[test]
+    fn test_parse_serde_json() {
+        let nom_certificate =
+            NomDecoder::from_der_and_kind(&DER_4, CertKind::Device).expect("unable to parse der_1");
+
+        let json_str =
+            serde_json::to_string(&nom_certificate).expect("unable to serialize cert_store");
+
+        let deserialized: NomCertificate =
+            serde_json::from_str(&json_str).expect("unable to deserialize cert_store");
+
+        assert_eq!(
+            nom_certificate.cert.spki.algorithm,
+            deserialized.cert.spki.algorithm
+        );
+        assert_eq!(
+            nom_certificate.cert.spki.public_key.data,
+            deserialized.cert.spki.public_key.data
+        );
+        assert_eq!(
+            nom_certificate.cert.signature.alg,
+            deserialized.cert.signature.alg
+        );
+        assert_eq!(
+            nom_certificate.cert.signature.sig.data,
+            deserialized.cert.signature.sig.data
+        );
     }
 }
